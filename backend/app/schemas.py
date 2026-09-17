@@ -61,6 +61,15 @@ class PolicyRecord(BaseModel):
     covered_events: list[str] = []
 
 
+class FraudFlagOut(BaseModel):
+    """One deterministic fraud cross-check flag (badge on case + queue)."""
+
+    code: str
+    severity: str = "low"  # high | medium | low
+    detail: str = ""
+    evidence: dict[str, Any] = {}
+
+
 class ClaimRecord(BaseModel):
     id: str
     policy_number: str = ""
@@ -76,6 +85,10 @@ class ClaimRecord(BaseModel):
     holder_name: str = ""
     is_historical: bool = False
     created_at: str = ""
+    # Fraud cross-check outputs (fraud agent): flags drive the case badge;
+    # the incident fingerprint backs future duplicate detection.
+    fraud_flags: list[FraudFlagOut] = []
+    incident_fingerprint: str = ""
     # Customer-provided contact for milestone notifications; adjuster-visible.
     contact_email: str = ""
     # Public status portal credential (adjuster case view displays it; the
@@ -102,6 +115,8 @@ class RecentClaimRecord(BaseModel):
     holder_name: Optional[str] = None
     incident_type: str = ""
     created_at: str = ""
+    # Queue badge: non-empty when the fraud cross-check flagged the claim.
+    fraud_flags: list[FraudFlagOut] = []
 
 
 class DashboardStatsResponse(BaseModel):

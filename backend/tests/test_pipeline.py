@@ -68,6 +68,7 @@ ALL_STAGES = {
     "INTAKE_AGENT",
     "POLICY_AGENT",
     "DOCUMENT_AGENT",
+    "FRAUD_AGENT",
     "ELIGIBILITY_AGENT",
     "DECISION_AGENT",
 }
@@ -232,8 +233,8 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     # with the runner's bookkeeping event.
     events = await get_claim_events("CLM-FULL-1")
     names = [e["event"] for e in events]
-    assert names.count("agent_start") == 5
-    assert names.count("agent_complete") == 5
+    assert names.count("agent_start") == 6
+    assert names.count("agent_complete") == 6
     assert "stp_finalized" in names
     assert names[-1] == "run_finalized"
 
@@ -305,8 +306,8 @@ async def test_rerun_resumes_from_checkpoints(monkeypatch, patched_mongo):
 
     claim = await database.claims_col.find_one({"id": "CLM-RES-1"})
     assert claim["status"] == "auto_approved"
-    # Trace rebuilt from checkpoints: all five stages present.
-    assert len(claim["agent_logs"]) == 5
+    # Trace rebuilt from checkpoints: all six stages present.
+    assert len(claim["agent_logs"]) == 6
 
 
 async def test_resubmission_after_terminal_run_seeds_next_attempt(

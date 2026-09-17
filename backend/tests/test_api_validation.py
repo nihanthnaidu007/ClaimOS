@@ -11,6 +11,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import server
+from agents import PIPELINE_STAGES
 
 VALID_CLAIM = {
     "policyNumber": "AUTO-2024-001847",
@@ -46,7 +47,11 @@ def test_ready_reports_connected(client):
 
 
 def test_root_status(client):
-    assert client.get("/api/").json() == {"status": "ok", "service": "ClaimOS API", "agents": 5}
+    assert client.get("/api/").json() == {
+        "status": "ok",
+        "service": "ClaimOS API",
+        "agents": len(PIPELINE_STAGES),
+    }
 
 
 def test_valid_submission_enqueues_run(client, patched_mongo, adjuster_headers):

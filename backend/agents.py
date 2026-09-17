@@ -23,6 +23,12 @@ from dotenv import load_dotenv
 
 from app.config import settings
 from app.llm.adapter import LLMAdapter, LLMError, LLMRefusal, get_adapter
+from app.fraud import (
+    FraudFlag,
+    detect_fraud_flags,
+    incident_fingerprint,
+    prior_claim_fingerprints,
+)
 from app.llm.schemas import (
     DecisionResult,
     DocumentAnalysis,
@@ -145,6 +151,29 @@ def _cached_system(agent_prompt: str) -> list[dict]:
         {"type": "text", "text": PROMPT_PREAMBLE, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": agent_prompt},
     ]
+
+
+class FraudCitedEvidence(BaseModel):
+    """One citation: a field of a prior claim record that backs the judgment."""
+
+    from_claim_id: str
+    field: str
+    value: str
+
+
+class FraudSimilarityOutput(BaseModel):
+    """LLM similarity judgment over duplicate-fingerprint candidates.
+
+    The deterministic duplicate rule has already flagged; the model only
+    judges whether the incidents plausibly describe the SAME event. Every
+    cited piece of evidence must come from the claim records included in
+    the prompt — no invented facts.
+    """
+
+    similar: bool
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    reasoning: str = ""
+    cited_evidence: list[FraudCitedEvidence] = Field(default_factory=list)
 
 
 async def _complete(agent, system_prompt, user_text, output_schema, claim_id):
@@ -479,7 +508,9 @@ async def eligibility_agent(state):
         "Policy record context: "
         f"status={policy_data.get('status', 'unknown')}, "
         f"coverage_limit={policy_data.get('coverage_limit', 0)}, "
-        f"deductible={policy_data.get('deductible', 0)}"
+        f"deductible={policy_data.get('deductible', 0)}, "
+        f"fraudFlags={json.dumps(state.get('fraud', {}).get('flags', []))}, "
+        f"fraudSimilarity={json.dumps(state.get('fraud', {}).get('similarity') or {})}"
     )
 
     result = await _complete_with_refusal_retry(
@@ -502,6 +533,7 @@ async def eligibility_agent(state):
         claim_frequency_flag=bool(state['policy'].get('claimFrequencyFlag', False)),
         consistency=documents.get('consistency'),
         red_flag_count=len(red_flags),
+        fraud_flag_severities=[f.get('severity', 'low') for f in state.get('fraud', {}).get('flags', [])],
     )
     eligibility['riskFactorDetails'] = eligibility.pop('riskFactors')
     eligibility['riskFactors'] = assessment.risk_factors
@@ -655,6 +687,107 @@ def _template_decision(state) -> dict:
         "confidence": 0.0,
     }
 
+async def fraud_agent(state):
+    """Agent 4: deterministic fraud cross-check + one LLM similarity judgment.
+
+    Rules run first (pure functions, app/fraud.py); the LLM is invoked only
+    when the duplicate-fingerprint rule found candidates, judging whether
+    the incidents plausibly describe the same event, citing fields from the
+    prior claim records. An LLM failure degrades to the deterministic flags
+    (recorded, never silent) — fraud checking must not break claims intake.
+    """
+    claim_id = state['claimId']
+    intake = state['intake'].get('normalizedData', {})
+    policy_data = state['policy'].get('policyData', {})
+    policy_number = (
+        intake.get('policyNumber')
+        or policy_data.get('policy_number')
+        or state['input'].get('policyNumber', '')
+    )
+    incident_date = str(intake.get('incidentDate', '') or '')
+    incident_type = str(intake.get('incidentType', '') or '')
+    claimed_amount = float(intake.get('claimedAmount', 0) or 0)
+
+    fingerprint = incident_fingerprint(policy_number, incident_date, incident_type)
+
+    # Prior claims on the same policy (seeded and pipeline-saved rows) — the
+    # duplicate rule and the similarity candidates share this one query.
+    prior_rows = await claims_col.find(
+        {"policy_number": policy_number, "id": {"$ne": claim_id}},
+        {
+            "_id": 0,
+            "id": 1,
+            "policy_number": 1,
+            "incident_date": 1,
+            "incident_type": 1,
+            "incident_fingerprint": 1,
+            "claimed_amount": 1,
+            "claim_date": 1,
+            "status": 1,
+        },
+    ).to_list(200)
+    prior_fingerprints = prior_claim_fingerprints(prior_rows)
+
+    flags: list[FraudFlag] = detect_fraud_flags(
+        claimed_amount=claimed_amount,
+        coverage_limit=float(policy_data.get('coverage_limit', 0) or 0),
+        incident_date=incident_date,
+        policy_start_date=str(policy_data.get('start_date', '') or ''),
+        fingerprint=fingerprint,
+        prior_incident_fingerprints=prior_fingerprints,
+        today=date.today(),
+    )
+
+    # Similarity candidates: prior rows whose fingerprint equals this claim's.
+    candidates = [
+        row for row in prior_rows
+        if (row.get("incident_fingerprint") or incident_fingerprint(
+            str(row.get("policy_number", "")),
+            str(row.get("incident_date", "")),
+            str(row.get("incident_type", "")),
+        )) == fingerprint
+    ]
+
+    similarity: dict | None = None
+    if candidates:
+        system_prompt = (
+            "You are the Fraud Similarity Judge. The claims system detected that a new "
+            "claim shares an incident fingerprint (same policy, incident date, incident "
+            "type) with prior claims. Decide whether the incidents plausibly describe "
+            "the SAME event or whether the match is a coincidence (e.g. a legitimate "
+            "recurring event). Judge ONLY from the record excerpts provided — every "
+            "cited_evidence entry must quote a field from those records verbatim, with "
+            "the claim id it came from. Never invent facts."
+        )
+        user_text = json.dumps(
+            {
+                "new_claim": {
+                    "claimId": claim_id,
+                    "policyNumber": policy_number,
+                    "incidentDate": incident_date,
+                    "incidentType": incident_type,
+                    "claimedAmount": claimed_amount,
+                },
+                "prior_claims": candidates,
+            },
+            default=str,
+        )
+        try:
+            result = await _complete("fraud", system_prompt, user_text, FraudSimilarityOutput, claim_id)
+            similarity = result.model_dump()
+        except LLMError as exc:
+            # Degraded mode: deterministic flags stand; record the failure.
+            logger.warning("fraud_similarity_llm_failed claim_id=%s error=%s", claim_id, exc)
+            similarity = {"error": str(exc)}
+
+    state['fraud'] = {
+        "fingerprint": fingerprint,
+        "flags": [flag.as_payload() for flag in flags],
+        "similarity": similarity,
+    }
+    return state
+
+
 
 async def decision_agent(state):
     """Agent 5: issue decision and generate the customer communication.
@@ -741,6 +874,8 @@ PIPELINE_STAGES = [
      "label": "Policy Verification", "desc": "Querying policy database for coverage verification"},
     {"name": "DOCUMENT_AGENT", "fn": document_agent, "stateKey": "documents",
      "label": "Document Analysis", "desc": "Analyzing claim documents for evidence and consistency"},
+    {"name": "FRAUD_AGENT", "fn": fraud_agent, "stateKey": "fraud",
+     "label": "Fraud Cross-Check", "desc": "Running deterministic fraud rules and duplicate-incident similarity"},
     {"name": "ELIGIBILITY_AGENT", "fn": eligibility_agent, "stateKey": "eligibility",
      "label": "Eligibility & Risk", "desc": "Calculating risk score and eligibility verdict"},
     {"name": "DECISION_AGENT", "fn": decision_agent, "stateKey": "decision",

@@ -22,6 +22,9 @@ APPLIED_LOW_CONSISTENCY = 20  # document analysis contradicts the claim
 APPLIED_BORDERLINE_CONSISTENCY = 10  # document analysis partially consistent
 APPLIED_PER_RED_FLAG = 8
 RED_FLAG_POINTS_CAP = 24  # 3 red flags max
+# Fraud cross-check bumps (fraud agent flags → eligibility risk score).
+FRAUD_SEVERITY_POINTS = {"high": 20, "medium": 10, "low": 5}
+FRAUD_POINTS_CAP = 40
 BASE_SCORE_MIN = 5
 BASE_SCORE_MAX = 15
 MAX_RISK_SCORE = 100
@@ -107,13 +110,16 @@ def compute_risk_assessment(
     claim_frequency_flag: bool,
     consistency: str | None,
     red_flag_count: int,
+    fraud_flag_severities: list[str] | None = None,
 ) -> RiskAssessment:
     """Additive risk formula + routing from the eligibility prompt.
 
     consistency is the Document agent's category: CONTRADICTS adds 20 points,
     PARTIALLY_CONSISTENT adds 10, and CONSISTENT / NO_DOCUMENTS / None (no
-    document analysis signal) carry no consistency penalty. An uncovered
-    incident or a non-active policy forces auto_reject regardless of the score.
+    document analysis signal) carry no consistency penalty. Fraud cross-check
+    flags add severity-weighted points, capped at FRAUD_POINTS_CAP. An
+    uncovered incident or a non-active policy forces auto_reject regardless
+    of the score.
     """
     factors: list[str] = []
     score = base_score_for_claim_size(claimed_amount, coverage_limit)
@@ -147,6 +153,13 @@ def compute_risk_assessment(
         capped_points = min(red_flag_count, RED_FLAG_POINTS_CAP // APPLIED_PER_RED_FLAG)
         score += capped_points * APPLIED_PER_RED_FLAG
         factors.append(f"{red_flag_count} document red flag(s)")
+
+    severities = fraud_flag_severities or []
+    if severities:
+        fraud_points = sum(FRAUD_SEVERITY_POINTS.get(s, 0) for s in severities)
+        fraud_points = min(fraud_points, FRAUD_POINTS_CAP)
+        score += fraud_points
+        factors.append(f"Fraud cross-check raised {len(severities)} flag(s)")
 
     score = min(score, MAX_RISK_SCORE)
 

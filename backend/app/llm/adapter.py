@@ -47,6 +47,7 @@ BACKOFF_CAP_S = 8.0
 DEFAULT_MODELS: dict[str, str] = {
     "intake": "claude-haiku-4-5",
     "document": "claude-haiku-4-5",
+    "fraud": "claude-haiku-4-5",
     "policy": "claude-sonnet-5",
     "eligibility": "claude-sonnet-5",
     "decision": "claude-sonnet-5",
