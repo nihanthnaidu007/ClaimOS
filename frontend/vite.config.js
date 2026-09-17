@@ -49,5 +49,8 @@ export default defineConfig({
     globals: true,
     setupFiles: './src/test/setup.js',
     css: false,
+    // Components build API URLs from this var (see src/test/handlers.js) — pin
+    // it so handler paths and component paths derive from the same base.
+    env: { VITE_API_BASE_URL: 'http://localhost:8001' },
   },
 });

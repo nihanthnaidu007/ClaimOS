@@ -129,9 +129,7 @@ jobs:
             npm install --no-audit --no-fund
           fi
       - name: Test
-        # No test files exist yet (audit finding); --passWithNoTests keeps the
-        # job green until the Vitest/RTL suites land with the Vite migration.
-        run: CI=true npm test -- --passWithNoTests
+        run: CI=true npm test
 
   # ---- 5. docker-builds -----------------------------------------------------
   docker-builds:

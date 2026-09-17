@@ -36,6 +36,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# Never commit yarn's lockfile — npm package-lock.json is the source of truth
+frontend/yarn.lock
+
 # Local databases
 *.sqlite3
 dump.rdb
