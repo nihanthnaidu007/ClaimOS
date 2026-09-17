@@ -1,7 +1,7 @@
 import json
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.events import emit_event
 from app.llm.adapter import LLMAdapter, get_adapter
+from app.rating import calculate_adjusted_payout, compute_risk_assessment
 from database import claims_col, policies_col
 
 ROOT_DIR = Path(__file__).parent
@@ -123,6 +124,20 @@ async def tool_claim_history(policy_number):
     return {"claims": claims, "count": len(claims), "duration_ms": duration}
 
 
+def _claim_frequency_flag(claims: list[dict]) -> bool:
+    """True when the policy has 3+ claims in the last 12 months."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=365)).date()
+    recent = 0
+    for claim in claims:
+        try:
+            claim_date = date.fromisoformat(str(claim.get("claim_date", ""))[:10])
+        except ValueError:
+            continue
+        if claim_date >= cutoff:
+            recent += 1
+    return recent >= 3
+
+
 # ============ AGENT FUNCTIONS ============
 
 async def intake_agent(state):
@@ -207,6 +222,19 @@ Submitted claim data - incident date: {normalized.get('incidentDate', '')}, inci
     result = await _complete("policy", system_prompt, user_text, PolicyOutput, state['claimId'])
     policy_result = result.model_dump()
     policy_result['policyData'] = policy_data
+
+    # Deterministic money math and claim frequency: the LLM's narrative stands,
+    # but the numbers feeding eligibility and the decision are computed here.
+    normalized = state['intake'].get('normalizedData', {})
+    payout = calculate_adjusted_payout(
+        claimed_amount=float(normalized.get('claimedAmount', 0) or 0),
+        coverage_limit=float(policy_data.get('coverage_limit', 0) or 0),
+        deductible=float(policy_data.get('deductible', 0) or 0),
+    )
+    policy_result['withinLimits'] = payout.within_limits
+    policy_result['adjustedPayout'] = payout.adjusted_payout
+    policy_result['deductibleApplied'] = payout.deductible_applied
+    policy_result['claimFrequencyFlag'] = _claim_frequency_flag(history_result['claims'])
     state['policy'] = policy_result
     return state
 
@@ -274,7 +302,28 @@ Policy Data: status={state['policy'].get('policyData', {}).get('status', 'unknow
 DOCUMENTS: {json.dumps(state['documents'])}"""
     
     result = await _complete("eligibility", system_prompt, user_text, EligibilityOutput, state['claimId'])
-    state['eligibility'] = result.model_dump()
+    eligibility = result.model_dump()
+
+    # Deterministic scoring: the LLM supplies narrative (fraud indicators,
+    # reasoning); the score, routing, and eligibility flag are computed here.
+    policy_data = state['policy'].get('policyData', {})
+    documents = state['documents']
+    assessment = compute_risk_assessment(
+        policy_status=str(policy_data.get('status', '') or ''),
+        incident_type=state['intake'].get('normalizedData', {}).get('incidentType', ''),
+        covered_events=list(policy_data.get('covered_events') or []),
+        claimed_amount=float(state['intake'].get('normalizedData', {}).get('claimedAmount', 0) or 0),
+        coverage_limit=float(policy_data.get('coverage_limit', 0) or 0),
+        deductible=float(policy_data.get('deductible', 0) or 0),
+        claim_frequency_flag=bool(state['policy'].get('claimFrequencyFlag', False)),
+        consistency_score=documents.get('consistencyScore'),
+        red_flag_count=len(documents.get('redFlags') or []),
+    )
+    eligibility['riskScore'] = assessment.risk_score
+    eligibility['recommendation'] = assessment.recommendation
+    eligibility['eligible'] = assessment.eligible
+    eligibility['riskFactors'] = assessment.risk_factors
+    state['eligibility'] = eligibility
     return state
 
 
