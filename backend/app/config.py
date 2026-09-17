@@ -97,6 +97,18 @@ class Settings(BaseSettings):
     # Pipeline worker: seconds between queue polls when the queue is empty.
     worker_poll_interval_seconds: float = 1.0
 
+    # ---- Adjuster workbench ----
+    # SLA hours per derived severity ("severity:hours" pairs, comma-separated).
+    # Severity vocabulary is the STP gate's binary one (app.stp): low | elevated.
+    sla_hours_per_severity: str = "low:72,elevated:24"
+    # Fallback SLA for a severity missing from the mapping above.
+    sla_default_hours: float = 48.0
+    # Fraction of the SLA target past which a queue row shows at-risk (amber);
+    # past 100% it is breached (red).
+    sla_at_risk_fraction: float = 0.75
+    # Workbench SSE stream: seconds between queue re-reads on an open stream.
+    workbench_stream_interval_seconds: float = 2.0
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:

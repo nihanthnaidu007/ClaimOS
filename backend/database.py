@@ -22,6 +22,9 @@ claim_runs_col = db.claim_runs
 seed_state_col = db.seed_state
 users_col = db.users
 refresh_tokens_col = db.refresh_tokens
+# Adjuster workbench: append-only decision audit trail. Writers only ever
+# insert; there is no update or delete path in the application.
+audit_log_col = db.audit_log
 
 SEED_MARKER_ID = "seed:v1"
 
@@ -226,6 +229,8 @@ async def seed_database():
     # {status, created_at} backs the worker's atomic queue-claim query.
     await claim_runs_col.create_index([("claim_id", 1), ("attempt", 1)], unique=True)
     await claim_runs_col.create_index([("status", 1), ("created_at", 1)])
+    # audit_log: append-only trail read newest-first per claim.
+    await audit_log_col.create_index([("claim_id", 1), ("at", -1)])
 
     # Marker claim: exactly one caller proceeds to the seeding block.
     try:

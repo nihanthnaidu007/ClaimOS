@@ -30,6 +30,7 @@ from app.schemas import (
     RootStatusResponse,
     SubmitClaimResponse,
 )
+from app.workbench_routes import router as workbench_router
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
@@ -311,6 +312,7 @@ async def ready():
 # ============ APP SETUP ============
 
 api_router.include_router(auth_router)  # /auth/* under the /api prefix
+api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
 app.include_router(api_router)
 
 

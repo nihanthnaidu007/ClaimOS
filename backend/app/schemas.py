@@ -175,3 +175,112 @@ class AuthTokensResponse(BaseModel):
     tokenType: str = "bearer"
     expiresInSeconds: int
     user: PublicUser
+# ---- Adjuster workbench (workbench PR) ----
+
+SEVERITY_VALUES = Literal["low", "elevated"]
+SLA_STATES = Literal["ok", "at_risk", "breached"]
+DECISION_VALUES = Literal["approved", "rejected"]
+
+OVERRIDE_REASON_MAX = 2000
+
+
+class WorkbenchSLA(BaseModel):
+    """SLA aging for one queue row, computed from the claim's stored age."""
+
+    targetHours: float
+    hoursElapsed: float
+    hoursRemaining: float
+    breached: bool
+    state: SLA_STATES
+
+
+class WorkbenchQueueRow(BaseModel):
+    id: str
+    policy_number: str = ""
+    holder_name: str = ""
+    incident_type: str = ""
+    claimed_amount: float = 0.0
+    status: str
+    risk_score: float = 0.0
+    created_at: str = ""
+    severity: SEVERITY_VALUES
+    sla: WorkbenchSLA
+    escalation_reason: str | None = None
+    failure_reason: str | None = None
+
+
+class WorkbenchQueueResponse(BaseModel):
+    rows: list[WorkbenchQueueRow]
+    generatedAt: str
+
+
+class CaseStageSummary(BaseModel):
+    agent: str
+    label: str
+    reached: bool
+    status: str
+    durationMs: int | None = None
+    reasoning: str | None = None
+
+
+class CaseSummaryResponse(BaseModel):
+    """Deterministic case summary assembled from stored agent traces (no LLM)."""
+
+    claimId: str
+    holderName: str = ""
+    policyNumber: str = ""
+    incidentType: str = ""
+    incidentDate: str = ""
+    claimedAmount: float = 0.0
+    status: str
+    severity: SEVERITY_VALUES
+    riskScore: float = 0.0
+    recommendation: str | None = None
+    confidence: float | None = None
+    eligibility: dict[str, Any] = {}
+    coverage: dict[str, Any] = {}
+    documents: dict[str, Any] = {}
+    decision: dict[str, Any] = {}
+    intakeValid: bool | None = None
+    stages: list[CaseStageSummary] = []
+    sla: WorkbenchSLA | None = None
+    escalationReason: str | None = None
+    failureReason: str | None = None
+    override: dict[str, Any] | None = None
+    source: str = "stored agent traces"
+
+
+class AuditEntry(BaseModel):
+    """One append-only audit_log row: who did what to which claim, and why."""
+
+    id: str
+    claim_id: str
+    actor: str
+    actor_email: str = ""
+    action: str
+    before: dict[str, Any] = {}
+    after: dict[str, Any] = {}
+    reason: str
+    at: str
+
+
+class OverrideRequest(BaseModel):
+    """Adjuster decision on a claim. The reason is what makes the override
+    legitimate — a missing or blank one is rejected with 422 (spec AC-7)."""
+
+    decision: DECISION_VALUES = "approved"
+    reason: str = Field(min_length=1, max_length=OVERRIDE_REASON_MAX)
+    payoutAmount: float | None = Field(default=None, ge=0, le=CLAIMED_AMOUNT_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required to override")
+        return value
+
+
+class OverrideResponse(BaseModel):
+    claimId: str
+    status: str
+    auditEntry: AuditEntry
