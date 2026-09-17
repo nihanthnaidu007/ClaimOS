@@ -13,7 +13,11 @@ import database
 from app.fraud import CODE_DUPLICATE_INCIDENT
 from app.usage import UsageLogger
 from pipeline import PipelineRunner, enqueue_claim_run, claim_next_run
-from tests.test_pipeline import (
+# backend/tests has no __init__.py: pytest imports these files as top-level
+# modules with backend/tests on sys.path, so the sibling fixture module is
+# importable directly — importing it as tests.test_pipeline would resolve to
+# the root tests/ package and break the combined "pytest tests/ backend/tests/" run.
+from test_pipeline import (
     CLEAN_OUTPUTS,
     PerAgentMessages,
     SUBMISSION,
