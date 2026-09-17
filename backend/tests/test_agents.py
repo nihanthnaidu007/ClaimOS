@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import sys
 
 import pytest
 
@@ -75,12 +74,6 @@ DECISION_MODEL = DecisionOutput(
     nextSteps=["Payout within 5-7 business days"],
     reasoning="Low risk, within policy limits.",
 )
-
-
-def test_agents_module_imports_without_emergent():
-    # agents.py is imported at module scope; the point is that the
-    # emergentintegrations package was never pulled into sys.modules.
-    assert "emergentintegrations" not in sys.modules
 
 
 def test_intake_agent_emits_validated_dict(monkeypatch):

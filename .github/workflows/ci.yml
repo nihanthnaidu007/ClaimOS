@@ -40,7 +40,7 @@ jobs:
       - name: Install ruff (version pinned in backend/requirements.txt)
         run: pip install ruff==0.16.8
       - name: Ruff check
-        run: ruff check backend
+        run: ruff check backend tests
 
   # ---- 2. backend-pytest ----------------------------------------------------
   backend-pytest:

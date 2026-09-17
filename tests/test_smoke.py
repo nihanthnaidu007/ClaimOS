@@ -2,8 +2,7 @@
 
 The production-readiness audit found tests/ empty; the deep suites (auth,
 pipeline, determinism) land with their own tasks. These tests assert the app
-boots with real dependencies installed — including the vendored
-emergentintegrations stub wheel — and that the API surface is mounted.
+boots with real dependencies installed and that the API surface is mounted.
 """
 
 import os
@@ -19,9 +18,8 @@ os.environ.setdefault("CORS_ORIGINS", "http://localhost:3000")
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-import server  # noqa: E402
+import server
+from fastapi.testclient import TestClient
 
 
 def test_app_boots_and_serves_root():

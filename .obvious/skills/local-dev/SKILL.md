@@ -21,8 +21,6 @@ description: How to bring ClaimOS (FastAPI + MongoDB + React/CRA) up locally in 
 
 - **`backend/.env` is mandatory** — `database.py` does `os.environ['MONGO_URL']` at import; uvicorn fails to boot without it. Minimum: `MONGO_URL=mongodb://127.0.0.1:27017`, `DB_NAME=claimos`.
 - **uvicorn must run from `backend/`** as the app dir (`uvicorn server:app`), not repo root.
-- **`emergentintegrations` is not on public PyPI.** The venv contains a stub (`emergentintegrations/llm/chat.py`) that keeps imports working; real LLM pipeline steps raise a clear RuntimeError until the Emergent base-image package + `EMERGENT_LLM_KEY` are available. Without a key, claims submit fine but stay `pending` with agent errors in `agent_logs` — this is graceful, not a crash.
-- **`backend_test.py` cannot be run directly** (hardcoded Emergent preview URL, writes to `/app/test_reports`). Import `ClaimOSAPITester` and pass `base_url="http://127.0.0.1:8001/api"`.
 - **No frontend unit tests exist** — `yarn test` exits 1 with "0 matches"; treat as expected, not a regression.
 - **No lockfile for the frontend** — no `yarn.lock` in git; `yarn install` resolves fresh.
 - Ports 27017/8001/3000 were free at onboarding; if 27017 is taken, the backend import chain fails (service_unreachable symptom = `ServerSelectionTimeoutError` in backend log).

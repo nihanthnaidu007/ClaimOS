@@ -1,6 +1,6 @@
 # ClaimOS — Agent Guidance
 
-Agentic insurance claims platform: FastAPI backend orchestrates a 5-agent claim pipeline (intake → policy → documents → eligibility → decision) over MongoDB, with a React dashboard that watches pipeline progress via Server-Sent Events. Originally built on the Emergent platform (`fastapi_react_mongo_shadcn` base image).
+Agentic insurance claims platform: FastAPI backend orchestrates a 5-agent claim pipeline (intake → policy → documents → eligibility → decision) over MongoDB, with a React dashboard that watches pipeline progress via Server-Sent Events.
 
 ## Stack
 
@@ -15,7 +15,7 @@ Agentic insurance claims platform: FastAPI backend orchestrates a 5-agent claim 
 `backend/.env` (gitignored by `*.env` pattern — must be created manually):
 - `MONGO_URL` — **required** (e.g. `mongodb://127.0.0.1:27017`)
 - `DB_NAME` — **required** (e.g. `claimos`; created and seeded automatically on backend startup)
-- `EMERGENT_LLM_KEY` — optional; without it the LLM agent pipeline cannot run and submitted claims stay `pending` with agent errors recorded in `agent_logs` (all other API/UI functionality works)
+- `ANTHROPIC_API_KEY` — optional; without it LLM-backed agent pipeline runs fail fast with a typed adapter error and submitted claims stay `pending` with the failure recorded in `agent_logs` (all other API/UI functionality works)
 - `CORS_ORIGINS` — optional (default `*`)
 
 `frontend/.env` (gitignored):
@@ -46,8 +46,8 @@ See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (A
 
 ## Local verification
 
-- API suite: `cd /home/user/work/ClaimOS && /home/user/venv-claimos/bin/python -c "import sys; sys.path.insert(0,'.'); from backend_test import ClaimOSAPITester; t=ClaimOSAPITester(base_url='http://127.0.0.1:8001/api'); t.run_all_tests()"` — **8/8 passed** during onboarding. (Running `backend_test.py` directly fails: it hardcodes the Emergent preview URL and an `/app` results path.)
-- Frontend unit tests: none exist (`CI=true yarn test --watchAll=false` → 0 test files). CRA ESLint runs on `yarn start`; compiles clean.
+- Test suite: `cd /home/user/work/ClaimOS && /home/user/venv-claimos/bin/python -m pytest tests/ backend/tests/ -v` (no live MongoDB needed; CI runs the same command).
+- Frontend unit tests: run from `frontend/` (Vite + Vitest).
 - Backend lint: `/home/user/venv-claimos/bin/flake8 --select=F backend/` → only 2 trivial F401 unused imports.
 - Browser evidence from onboarding: `/home/user/data/evidence/dashboard.png`, `/home/user/data/evidence/new-claim.png` (Playwright + headless Chromium, 0 console errors).
 
@@ -58,7 +58,5 @@ See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (A
 
 ## Known quirks
 
-- `emergentintegrations` (LLM SDK used by `backend/agents.py`) is not on public PyPI — it ships only in Emergent base images. A stub with the same `LlmChat`/`UserMessage` surface is installed in the venv site-packages so imports work; real LLM calls raise a clear RuntimeError.
-- `backend_test.py` is Emergent-image specific (preview URL + `/app` paths) — import the class with an explicit `base_url` instead.
 - `README.md` is a placeholder ("Here are your Instructions"); `memory/PRD.md` holds the product requirements.
 - `database.py` calls `os.environ['MONGO_URL']` at import time — the backend will not start without `backend/.env`.
