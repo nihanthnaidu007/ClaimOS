@@ -1,23 +1,25 @@
-import os
-import logging
-from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-from pathlib import Path
 from datetime import datetime, timezone
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+import structlog
+from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import BulkWriteError, DuplicateKeyError
 
-logger = logging.getLogger(__name__)
+from app.config import settings
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logger = structlog.get_logger(__name__)
+
+client = AsyncIOMotorClient(settings.mongo_url, serverSelectionTimeoutMS=10000)
+db = client[settings.db_name]
 
 # Collections
 policies_col = db.policies
 claims_col = db.claims
 claim_documents_col = db.claim_documents
+counters_col = db.counters
+events_col = db.events
+seed_state_col = db.seed_state
+
+SEED_MARKER_ID = "seed:v1"
 
 SEED_POLICIES = [
     {
@@ -191,39 +193,66 @@ SEED_HISTORICAL_CLAIMS = [
 ]
 
 
+def _raise_on_real_conflict(exc: BulkWriteError, collection: str) -> None:
+    """Duplicate keys are benign seed races; any other write error is fatal."""
+    write_errors = exc.details.get("writeErrors", [])
+    if any(err.get("code") != 11000 for err in write_errors):
+        raise exc
+    logger.warning(
+        "seed_partial_duplicates_ignored", collection=collection, duplicates=len(write_errors)
+    )
+
+
 async def seed_database():
-    """Seed database with policies and historical claims if empty."""
-    policy_count = await policies_col.count_documents({})
-    if policy_count == 0:
-        logger.info("Seeding policies...")
-        await policies_col.insert_many(SEED_POLICIES)
-        logger.info(f"Seeded {len(SEED_POLICIES)} policies")
+    """Idempotently seed policies and historical claims.
 
-    claim_count = await claims_col.count_documents({"is_historical": True})
-    if claim_count == 0:
-        logger.info("Seeding historical claims...")
-        historical_docs = []
-        for i, claim in enumerate(SEED_HISTORICAL_CLAIMS):
-            doc = {
-                "id": f"CLM-HIST-{i+1:03d}",
-                "policy_number": claim["policy_number"],
-                "claim_date": claim["claim_date"],
-                "incident_date": claim["incident_date"],
-                "incident_type": claim["incident_type"],
-                "claimed_amount": claim["claimed_amount"],
-                "status": claim["status"],
-                "risk_score": claim["risk_score"],
-                "decision_reason": claim["decision_reason"],
-                "agent_trace": {},
-                "is_historical": True,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            historical_docs.append(doc)
-        await claims_col.insert_many(historical_docs)
-        logger.info(f"Seeded {len(historical_docs)} historical claims")
-
-    # Create indexes
+    Startup races (multiple workers, container restarts) previously produced
+    duplicate seeds: count-guards were checked before any unique index existed.
+    Now indexes are created first, a marker doc is claimed before seeding, and
+    duplicate writes are tolerated so concurrent seeds converge.
+    """
+    # Indexes first: duplicate-seed protection must exist before any insert.
     await policies_col.create_index("policy_number", unique=True)
     await claims_col.create_index("id", unique=True)
     await claims_col.create_index("policy_number")
     await claim_documents_col.create_index("claim_id")
+    await events_col.create_index([("claim_id", 1), ("seq", 1)], unique=True)
+
+    # Marker claim: exactly one caller proceeds to the seeding block.
+    try:
+        await seed_state_col.insert_one(
+            {"_id": SEED_MARKER_ID, "seeded_at": datetime.now(timezone.utc).isoformat()}
+        )
+    except DuplicateKeyError:
+        logger.info("seed_skipped", reason="marker present")
+        return
+
+    # Seeded separately: tolerated policy duplicates must not skip claims.
+    try:
+        await policies_col.insert_many(SEED_POLICIES, ordered=False)
+        logger.info("seeded_policies", count=len(SEED_POLICIES))
+    except BulkWriteError as exc:
+        _raise_on_real_conflict(exc, "policies")
+
+    historical_docs = [
+        {
+            "id": f"CLM-HIST-{i + 1:03d}",
+            "policy_number": claim["policy_number"],
+            "claim_date": claim["claim_date"],
+            "incident_date": claim["incident_date"],
+            "incident_type": claim["incident_type"],
+            "claimed_amount": claim["claimed_amount"],
+            "status": claim["status"],
+            "risk_score": claim["risk_score"],
+            "decision_reason": claim["decision_reason"],
+            "agent_trace": {},
+            "is_historical": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        for i, claim in enumerate(SEED_HISTORICAL_CLAIMS)
+    ]
+    try:
+        await claims_col.insert_many(historical_docs, ordered=False)
+        logger.info("seeded_historical_claims", count=len(historical_docs))
+    except BulkWriteError as exc:
+        _raise_on_real_conflict(exc, "claims")
