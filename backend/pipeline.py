@@ -58,12 +58,19 @@ def _now() -> str:
 async def enqueue_claim_run(claim_id: str, submission: dict) -> dict:
     """Insert the first (or next) run for a claim; returns the queued document.
 
-    A re-submission creates attempt N+1 seeded with the latest run's completed
-    checkpoints, so agents that already finished are never re-executed.
+    Idempotent while a run is still in flight: if the latest attempt is queued
+    or running it is returned unchanged, so a re-submission can never spawn a
+    second execution of the same claim. A new attempt (N+1, seeded with the
+    latest run's completed checkpoints) is created only when the previous run
+    reached a terminal state. Recovery for runs orphaned in `running` by a
+    hard crash is lease/reaper territory — the graceful-shutdown path requeues
+    them explicitly.
     """
     latest = await database.claim_runs_col.find_one(
         {"claim_id": claim_id}, sort=[("attempt", -1)]
     )
+    if latest and latest.get("status") in (RUN_QUEUED, RUN_RUNNING):
+        return latest
     checkpoints = _completed_checkpoints(latest) if latest else {}
     attempt = int(latest["attempt"]) + 1 if latest else 1
     now = _now()
@@ -134,7 +141,7 @@ class PipelineRunner:
     """Executes one claimed run: durable events, per-stage checkpoints, resume."""
 
     def __init__(self, run_doc: dict, *, should_stop=None):
-        self.run = run_doc
+        self.run_doc = run_doc
         self.claim_id = run_doc["claim_id"]
         # Cooperative-cancel hook (graceful shutdown): checked between stages,
         # after the previous stage's checkpoint is safely persisted.
@@ -145,8 +152,8 @@ class PipelineRunner:
         """Rebuild orchestrator state from the run input + checkpointed outputs."""
         state = {
             "claimId": self.claim_id,
-            "submittedAt": self.run.get("created_at") or _now(),
-            "input": dict(self.run.get("input") or {}),
+            "submittedAt": self.run_doc.get("created_at") or _now(),
+            "input": dict(self.run_doc.get("input") or {}),
             "intake": {},
             "policy": {},
             "documents": {},
@@ -155,7 +162,7 @@ class PipelineRunner:
             "agentLogs": [],
         }
         for stage in PIPELINE_STAGES:
-            cp = (self.run.get("stages") or {}).get(stage["name"])
+            cp = (self.run_doc.get("stages") or {}).get(stage["name"])
             if cp and cp.get("status") == "done":
                 state[stage["stateKey"]] = cp.get("output") or {}
                 # Rebuild the trace entry so a resumed run's claim document
@@ -174,7 +181,7 @@ class PipelineRunner:
 
     async def run(self) -> str:
         """Execute the remaining stages; returns the run's terminal status."""
-        checkpoints = self.run.setdefault("stages", {})
+        checkpoints = self.run_doc.setdefault("stages", {})
         final_status: str | None = None
 
         for stage in PIPELINE_STAGES:
@@ -183,11 +190,11 @@ class PipelineRunner:
             if self.should_stop():
                 # Graceful shutdown: everything up to here is checkpointed;
                 # hand the remainder back to the queue instead of racing exit.
-                await requeue_run(self.claim_id, self.run["attempt"])
+                await requeue_run(self.claim_id, self.run_doc["attempt"])
                 logger.info(
                     "run_requeued_for_shutdown claim_id=%s attempt=%s",
                     self.claim_id,
-                    self.run["attempt"],
+                    self.run_doc["attempt"],
                 )
                 return RUN_QUEUED
 
@@ -211,8 +218,8 @@ class PipelineRunner:
             {
                 "event": "run_finalized",
                 "status": final_status,
-                "attempt": self.run["attempt"],
-                "failure_reason": self.run.get("failure_reason"),
+                "attempt": self.run_doc["attempt"],
+                "failure_reason": self.run_doc.get("failure_reason"),
             }
         )
         await self._finalize_run(final_status)
@@ -244,7 +251,7 @@ class PipelineRunner:
             eligibility=self.state.get("eligibility") or {},
             threshold=settings.stp_confidence_threshold,
         )
-        self.run["stp"] = {
+        self.run_doc["stp"] = {
             "decision": "auto_approved" if gate.auto_finalize else "escalated",
             "confidence": decision.get("confidence", 0.0),
             "severity": severity,
@@ -263,7 +270,7 @@ class PipelineRunner:
             return RUN_AUTO_APPROVED
 
         reason = gate.escalation_reason()
-        self.run["escalation_reason"] = reason
+        self.run_doc["escalation_reason"] = reason
         await self._emit(
             {
                 "event": "stp_escalated",
@@ -305,7 +312,7 @@ class PipelineRunner:
             log_entry["durationMs"] = duration
             logger.exception(
                 "agent_failed agent=%s claim_id=%s attempt=%s",
-                stage["name"], self.claim_id, self.run["attempt"],
+                stage["name"], self.claim_id, self.run_doc["attempt"],
             )
             # Sanitized: raw exception text never reaches the client stream.
             await self._emit(
@@ -319,7 +326,7 @@ class PipelineRunner:
             )
             failure = f"Agent {stage['name']} failed"
             await self._emit({"event": "claim_failed", "reason": failure})
-            self.run["failure_reason"] = failure
+            self.run_doc["failure_reason"] = failure
             await self._save_claim(status=RUN_FAILED, failure_reason=failure)
             return "failed"
 
@@ -390,7 +397,7 @@ class PipelineRunner:
     async def _persist_checkpoint(self, stage_name: str, checkpoint: dict) -> None:
         """Atomically record one stage's output on the run document."""
         await database.claim_runs_col.update_one(
-            {"claim_id": self.claim_id, "attempt": self.run["attempt"]},
+            {"claim_id": self.claim_id, "attempt": self.run_doc["attempt"]},
             {"$set": {f"stages.{stage_name}": checkpoint, "updated_at": _now()}},
         )
 
@@ -410,14 +417,14 @@ class PipelineRunner:
                 "usage": usage,
             }
         }
-        if self.run.get("failure_reason"):
-            update["$set"]["failure_reason"] = self.run["failure_reason"]
-        if self.run.get("escalation_reason"):
-            update["$set"]["escalation_reason"] = self.run["escalation_reason"]
-        if self.run.get("stp"):
-            update["$set"]["stp"] = self.run["stp"]
+        if self.run_doc.get("failure_reason"):
+            update["$set"]["failure_reason"] = self.run_doc["failure_reason"]
+        if self.run_doc.get("escalation_reason"):
+            update["$set"]["escalation_reason"] = self.run_doc["escalation_reason"]
+        if self.run_doc.get("stp"):
+            update["$set"]["stp"] = self.run_doc["stp"]
         await database.claim_runs_col.update_one(
-            {"claim_id": self.claim_id, "attempt": self.run["attempt"]}, update
+            {"claim_id": self.claim_id, "attempt": self.run_doc["attempt"]}, update
         )
         # The claim record carries the same rollup for API consumers.
         if usage is not None:
@@ -457,9 +464,9 @@ class PipelineRunner:
         }
         if failure_reason:
             claim_doc["failure_reason"] = failure_reason
-        if self.run.get("escalation_reason"):
-            claim_doc["escalation_reason"] = self.run["escalation_reason"]
-            claim_doc["stp"] = self.run.get("stp")
+        if self.run_doc.get("escalation_reason"):
+            claim_doc["escalation_reason"] = self.run_doc["escalation_reason"]
+            claim_doc["stp"] = self.run_doc.get("stp")
 
         doc_text = self.state["input"].get("documentText", "")
         if doc_text:
@@ -481,5 +488,5 @@ class PipelineRunner:
         await database.claims_col.replace_one({"id": self.claim_id}, claim_doc, upsert=True)
         logger.info(
             "claim_saved claim_id=%s attempt=%s status=%s",
-            self.claim_id, self.run["attempt"], status,
+            self.claim_id, self.run_doc["attempt"], status,
         )
