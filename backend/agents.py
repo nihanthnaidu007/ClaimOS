@@ -7,7 +7,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-from app.events import emit_event
 from app.llm.adapter import LLMAdapter, get_adapter
 from app.rating import calculate_adjusted_payout, compute_risk_assessment
 from database import claims_col, policies_col
@@ -366,193 +365,18 @@ Holder Name: {holder_name}"""
     return state
 
 
-# ============ ORCHESTRATOR ============
-
-class ClaimOrchestrator:
-    def __init__(self, claim_id, queue):
-        self.claim_id = claim_id
-        self.queue = queue
-        self.state = self._create_initial_state(claim_id)
-    
-    def _create_initial_state(self, claim_id):
-        return {
-            "claimId": claim_id,
-            "submittedAt": datetime.now(timezone.utc).isoformat(),
-            "input": {},
-            "intake": {},
-            "policy": {},
-            "documents": {},
-            "eligibility": {},
-            "decision": {},
-            "agentLogs": []
-        }
-    
-    async def stream(self, data):
-        """Fan out to the live queue and the durable event log."""
-        await self.queue.put(data)
-        try:
-            await emit_event(self.claim_id, data)
-        except Exception:  # noqa: BLE001 — live streaming must survive a durability hiccup
-            logger.exception("event_persist_failed for claim %s", self.claim_id)
-    
-    async def run(self, form_data):
-        self.state['input'] = form_data
-        
-        pipeline = [
-            {"name": "INTAKE_AGENT", "fn": intake_agent, "stateKey": "intake",
-             "label": "Intake & Validation", "desc": "Validating claim fields and normalizing data"},
-            {"name": "POLICY_AGENT", "fn": policy_agent, "stateKey": "policy",
-             "label": "Policy Verification", "desc": "Querying policy database for coverage verification"},
-            {"name": "DOCUMENT_AGENT", "fn": document_agent, "stateKey": "documents",
-             "label": "Document Analysis", "desc": "Analyzing claim documents for evidence and consistency"},
-            {"name": "ELIGIBILITY_AGENT", "fn": eligibility_agent, "stateKey": "eligibility",
-             "label": "Eligibility & Risk", "desc": "Calculating risk score and eligibility verdict"},
-            {"name": "DECISION_AGENT", "fn": decision_agent, "stateKey": "decision",
-             "label": "Decision & Communication", "desc": "Issuing final verdict and drafting communication"},
-        ]
-        
-        for step in pipeline:
-            start_time = time.time()
-            
-            # Add agent log entry
-            log_entry = {
-                "agent": step["name"],
-                "status": "running",
-                "startTime": datetime.now(timezone.utc).isoformat(),
-                "endTime": None,
-                "toolsCalled": [],
-                "durationMs": 0
-            }
-            self.state['agentLogs'].append(log_entry)
-            
-            # Stream: agent starting
-            await self.stream({
-                "event": "agent_start",
-                "agent": step["name"],
-                "label": step["label"],
-                "description": step["desc"],
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            })
-            
-            try:
-                self.state = await step["fn"](self.state)
-                duration = int((time.time() - start_time) * 1000)
-                
-                # Update log
-                log_entry["status"] = "done"
-                log_entry["endTime"] = datetime.now(timezone.utc).isoformat()
-                log_entry["durationMs"] = duration
-                
-                # Get tool calls for this agent
-                tools = []
-                for log in self.state['agentLogs']:
-                    if log['agent'] == step['name']:
-                        tools = log.get('toolsCalled', [])
-                        break
-                
-                # Stream: agent complete
-                await self.stream({
-                    "event": "agent_complete",
-                    "agent": step["name"],
-                    "label": step["label"],
-                    "duration": duration,
-                    "output": self.state[step["stateKey"]],
-                    "toolsCalled": tools
-                })
-                
-                # Check halt conditions
-                if step["name"] == "INTAKE_AGENT" and not self.state['intake'].get('valid', False):
-                    await self.stream({
-                        "event": "pipeline_halted",
-                        "reason": "Invalid submission",
-                        "data": self.state['intake']
-                    })
-                    break
-                
-                if step["name"] == "POLICY_AGENT" and not self.state['policy'].get('found', False):
-                    await self.stream({
-                        "event": "pipeline_halted",
-                        "reason": "Policy not found",
-                        "data": self.state['policy']
-                    })
-                    break
-                    
-            except Exception:  # noqa: BLE001 — recorded below, then the pipeline halts
-                duration = int((time.time() - start_time) * 1000)
-                log_entry["status"] = "error"
-                log_entry["endTime"] = datetime.now(timezone.utc).isoformat()
-                log_entry["durationMs"] = duration
-
-                logger.exception("Agent %s failed for claim %s", step['name'], self.claim_id)
-                # Sanitized: raw exception text never reaches the client stream.
-                await self.stream({
-                    "event": "agent_error",
-                    "agent": step["name"],
-                    "label": step["label"],
-                    "error": "Internal pipeline error",
-                    "duration": duration
-                })
-                # Downstream agents depend on this step's output: halt the run
-                # and persist the failure instead of continuing with broken state.
-                await self._fail_claim(f"Agent {step['name']} failed")
-                return self.state
-        
-        # Stream: pipeline complete
-        await self.stream({
-            "event": "pipeline_complete",
-            "finalState": self.state
-        })
-        
-        # Persist to MongoDB; a persistence failure propagates to the server's
-        # pipeline handler, which logs it and emits a sanitized error event.
-        await self._save_to_database()
-        
-        return self.state
-
-    async def _fail_claim(self, reason: str):
-        """Mark the claim failed: emit the reason event and persist it."""
-        await self.stream({
-            "event": "claim_failed",
-            "reason": reason,
-        })
-        await self._save_to_database(failure_reason=reason)
-
-    async def _save_to_database(self, failure_reason: str | None = None):
-        """Save claim to MongoDB; raises on failure instead of swallowing."""
-        claim_doc = {
-            "id": self.state['claimId'],
-            "policy_number": self.state['input'].get('policyNumber', ''),
-            "claim_date": datetime.now(timezone.utc).isoformat(),
-            "incident_date": self.state['intake'].get('normalizedData', {}).get('incidentDate', ''),
-            "incident_type": self.state['intake'].get('normalizedData', {}).get('incidentType', self.state['input'].get('incidentType', '')),
-            "claimed_amount": float(self.state['intake'].get('normalizedData', {}).get('claimedAmount', self.state['input'].get('claimedAmount', 0))),
-            "status": "failed" if failure_reason else self.state.get('decision', {}).get('verdict', 'pending'),
-            "risk_score": self.state.get('eligibility', {}).get('riskScore', 0),
-            "decision_reason": self.state.get('decision', {}).get('reasoning', ''),
-            "agent_trace": {
-                "intake": self.state.get('intake', {}),
-                "policy": {k: v for k, v in self.state.get('policy', {}).items() if k != 'policyData'},
-                "documents": self.state.get('documents', {}),
-                "eligibility": self.state.get('eligibility', {}),
-                "decision": self.state.get('decision', {}),
-            },
-            "agent_logs": self.state.get('agentLogs', []),
-            "holder_name": self.state.get('policy', {}).get('policyData', {}).get('holder_name', ''),
-            "is_historical": False,
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        if failure_reason:
-            claim_doc["failure_reason"] = failure_reason
-
-        # Store document text if provided
-        doc_text = self.state['input'].get('documentText', '')
-        if doc_text:
-            await claims_col.database.claim_documents.insert_one({
-                "claim_id": self.state['claimId'],
-                "document_type": "evidence_text",
-                "content_text": doc_text,
-                "uploaded_at": datetime.now(timezone.utc).isoformat()
-            })
-
-        await claims_col.insert_one(claim_doc)
-        logger.info("Claim %s saved to database", self.state['claimId'])
+# ============ PIPELINE STAGES ============
+# Executed in order by pipeline.PipelineRunner. Each entry owns the state key
+# its agent writes plus the display metadata the SSE stream and dashboard use.
+PIPELINE_STAGES = [
+    {"name": "INTAKE_AGENT", "fn": intake_agent, "stateKey": "intake",
+     "label": "Intake & Validation", "desc": "Validating claim fields and normalizing data"},
+    {"name": "POLICY_AGENT", "fn": policy_agent, "stateKey": "policy",
+     "label": "Policy Verification", "desc": "Querying policy database for coverage verification"},
+    {"name": "DOCUMENT_AGENT", "fn": document_agent, "stateKey": "documents",
+     "label": "Document Analysis", "desc": "Analyzing claim documents for evidence and consistency"},
+    {"name": "ELIGIBILITY_AGENT", "fn": eligibility_agent, "stateKey": "eligibility",
+     "label": "Eligibility & Risk", "desc": "Calculating risk score and eligibility verdict"},
+    {"name": "DECISION_AGENT", "fn": decision_agent, "stateKey": "decision",
+     "label": "Decision & Communication", "desc": "Issuing final verdict and drafting communication"},
+]

@@ -7,7 +7,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
-from agents import ClaimOrchestrator
 from app.auth_routes import router as auth_router
 from app.config import settings
 from app.counters import next_claim_number
@@ -33,6 +32,7 @@ from app.schemas import (
     SubmitClaimResponse,
 )
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
+from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
 
 app = FastAPI(
@@ -109,34 +109,13 @@ async def submit_claim(
     claim_id = await generate_claim_id()
 
     # Return claim ID immediately
-    response = {"claimId": claim_id, "message": "Claim received. Connect to stream endpoint."}
+    response = {"claimId": claim_id, "message": "Claim queued for processing."}
 
-    # Schedule pipeline to run after response is sent
-    async def run_pipeline():
-        await asyncio.sleep(0.5)  # Give client time to connect SSE
-        queue = sse_queues.get(claim_id)
-        if not queue:
-            # Wait a bit more for SSE connection
-            await asyncio.sleep(1.5)
-            queue = sse_queues.get(claim_id)
+    # Durable dispatch: the claim_runs row IS the queue. A worker claims it
+    # atomically; the API process never executes the pipeline itself.
+    await enqueue_claim_run(claim_id, submission.model_dump())
+    logger.info("claim_submitted", claim_id=claim_id)
 
-        if not queue:
-            queue = asyncio.Queue()
-            sse_queues[claim_id] = queue
-
-        orchestrator = ClaimOrchestrator(claim_id, queue)
-        try:
-            await orchestrator.run(submission.model_dump())
-        except Exception as exc:
-            logger.exception("pipeline_failed", claim_id=claim_id, error=str(exc))
-            failure_event = {"event": "pipeline_error", "error": "Internal pipeline error. Please try again."}
-            await queue.put(failure_event)
-            try:
-                await emit_event(claim_id, failure_event)
-            except Exception:
-                logger.exception("event_persist_failed", claim_id=claim_id)
-
-    asyncio.create_task(run_pipeline())
     return response
 
 @api_router.get("/claims", response_model=list[ClaimRecord])

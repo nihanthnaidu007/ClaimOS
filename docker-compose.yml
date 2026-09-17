@@ -31,9 +31,10 @@ services:
       start_period: 15s
 
   worker:
-    image: claimos-api  # same backend image as api
-    # Placeholder entrypoint — the durable-pipeline task owns the real worker command.
-    command: ["sh", "-c", "exec sleep infinity"]
+    image: claimos-api  # same backend image as api; CI needs no separate build
+    # The worker polls the claim_runs queue; SIGTERM triggers a graceful
+    # checkpoint-and-requeue exit (compose sends it on `docker compose stop`).
+    command: ["python", "worker.py"]
     environment:
       MONGO_URL: mongodb://mongo:27017/claimos
       DB_NAME: claimos
