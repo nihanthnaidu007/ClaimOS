@@ -280,7 +280,7 @@ def test_intake_valid_output_round_trips(monkeypatch):
     assert result["intake"]["valid"] is True
     assert result["intake"]["normalizedData"]["incidentType"] == "accident"
     call = messages.parse_calls[0]
-    assert call["temperature"] == 0.0
+    assert call["extra_body"]["temperature"] == 0.0
     assert call["max_tokens"] == AGENT_PARAMS["intake"]["max_tokens"]
     assert call["output_format"] is IntakeResult
     json.dumps(result)  # SSE payloads embed agent output as JSON
@@ -422,7 +422,7 @@ def test_document_valid_output_round_trips(monkeypatch):
     assert result["documents"]["consistencyScore"] == 90
     call = messages.parse_calls[0]
     assert call["output_format"] is DocumentAnalysis
-    assert call["temperature"] == AGENT_PARAMS["document"]["temperature"]
+    assert call["extra_body"]["temperature"] == AGENT_PARAMS["document"]["temperature"]
 
 
 def test_document_no_documents_gets_no_score(monkeypatch):

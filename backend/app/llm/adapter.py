@@ -198,7 +198,10 @@ class LLMAdapter:
                     "output_format": output_schema,
                 }
                 if temperature is not None:
-                    call_kwargs["temperature"] = temperature
+                    # SDK 1.6.0's messages.parse() has no temperature kwarg;
+                    # extra_body is its documented escape hatch for params
+                    # missing from the helper's typed signature.
+                    call_kwargs["extra_body"] = {"temperature": temperature}
                 response = await self.client.messages.parse(**call_kwargs)
                 break
             except Exception as exc:
