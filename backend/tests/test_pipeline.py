@@ -361,20 +361,23 @@ async def test_agent_failure_persists_sanitized_failed_claim(monkeypatch, patche
     assert "Internal pipeline error" in serialized
 
 
-async def test_last_event_id_replay(patched_mongo):
+async def test_last_event_id_replay(patched_mongo, make_authenticated_user):
     """The SSE stream replays strictly after Last-Event-ID and ends terminal."""
     for i in range(1, 5):
         await emit_event("CLM-SSE-1", {"event": f"evt_{i}", "n": i})
     await emit_event("CLM-SSE-1", {"event": "run_finalized", "status": "auto_approved"})
 
     import server as server_mod
-    from httpx import ASGITransport, AsyncClient
+    from fastapi.testclient import TestClient
 
-    transport = ASGITransport(app=server_mod.app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get(
+    with TestClient(server_mod.app) as client:  # lifespan seeding
+        # Every claim-data route is authenticated; the durable stream is no
+        # exception. The sync client matches make_authenticated_user; the
+        # stream self-terminates on run_finalized, so a full-body GET is safe.
+        headers, _, _ = make_authenticated_user(client)
+        response = client.get(
             "/api/events/streams/CLM-SSE-1",
-            headers={"Last-Event-ID": "2"},
+            headers={**headers, "Last-Event-ID": "2"},
         )
 
     assert response.status_code == 200

@@ -15,7 +15,7 @@ from app.deps import (
     require_authenticated,
     verify_csrf,
 )
-from app.events import emit_event, tail_claim_events
+from app.events import tail_claim_events
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
