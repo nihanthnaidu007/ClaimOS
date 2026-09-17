@@ -40,6 +40,9 @@ class ClaimSubmission(BaseModel):
 class SubmitClaimResponse(BaseModel):
     claimId: str
     message: str
+    # Public status portal credential: shown once to the submitting party and
+    # displayable in the adjuster case view. The claim doc stores its hash.
+    accessCode: str = ""
 
 
 class PolicyRecord(BaseModel):
@@ -73,6 +76,11 @@ class ClaimRecord(BaseModel):
     holder_name: str = ""
     is_historical: bool = False
     created_at: str = ""
+    # Customer-provided contact for milestone notifications; adjuster-visible.
+    contact_email: str = ""
+    # Public status portal credential (adjuster case view displays it; the
+    # public lookup matches only its SHA-256 hash).
+    access_code: str | None = None
     # Set when the claim failed or was escalated by the pipeline worker.
     failure_reason: str | None = None
     escalation_reason: str | None = None
@@ -175,6 +183,8 @@ class AuthTokensResponse(BaseModel):
     tokenType: str = "bearer"
     expiresInSeconds: int
     user: PublicUser
+
+
 # ---- Adjuster workbench (workbench PR) ----
 
 SEVERITY_VALUES = Literal["low", "elevated"]
@@ -284,3 +294,51 @@ class OverrideResponse(BaseModel):
     claimId: str
     status: str
     auditEntry: AuditEntry
+
+
+# ---- Public status portal (customer communications PR) ----
+
+_CLAIM_NUMBER_PATTERN = r"^CLM-[0-9]{8}-[0-9]{1,6}$|^CLM-HIST-[0-9]{1,6}$"
+
+
+class StatusAccessRequest(BaseModel):
+    """Claim number + access code — the public portal's only credential pair."""
+
+    claimNumber: str = Field(min_length=4, max_length=40, pattern=_CLAIM_NUMBER_PATTERN)
+    accessCode: str = Field(min_length=16, max_length=200)
+
+
+class StatusLookupRequest(StatusAccessRequest):
+    pass
+
+
+class StatusLetterRequest(StatusAccessRequest):
+    pass
+
+
+class StatusMilestone(BaseModel):
+    key: str
+    label: str
+    at: Optional[str] = None
+    done: bool = False
+
+
+class StatusLookupResponse(BaseModel):
+    """Masked portal payload: first name + claim status are the only identity
+    data; amounts, contact details, and policy numbers never appear."""
+
+    claimNumber: str
+    firstName: str = ""
+    status: str
+    statusLabel: str
+    currentStage: Optional[str] = None
+    incidentType: str = ""
+    decisionOutcome: Optional[str] = None
+    decisionReady: bool = False
+    pdfAvailable: bool = False
+    milestones: list[StatusMilestone] = []
+
+
+class StatusLetterResponse(BaseModel):
+    pdf: str
+    claimId: str

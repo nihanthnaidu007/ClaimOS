@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Rate limits (slowapi syntax). Applied per client IP.
     login_rate_limit: str = "5/minute"
     fnol_rate_limit: str = "10/minute"
+    # Public status portal lookups. Headroom above the status page's own
+    # polling (one lookup every few seconds per open tab) while still capping
+    # code-guessing per IP.
+    status_lookup_rate_limit: str = "60/minute"
 
     @property
     def refresh_cookie_secure(self) -> bool:
