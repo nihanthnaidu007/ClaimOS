@@ -1,10 +1,9 @@
 # CI substrate — 7-job pipeline per the CI/CD research doc (art_O0T4HZMZ).
 #
-# Tracking decision (substrate task todo_QNAl5K7v): security-audit runs
-# advisory-only (step-level continue-on-error — the check stays green while
-# findings surface as failed steps) until the backend-hardening task adds CVE
-# triage; remove the flags and flip it to blocking then. Baseline 2026-09-17:
-# pip-audit reports 206 known vulnerabilities in 22 packages (scaffold pins).
+# Tracking decision (substrate task todo_QNAl5K7v, triaged by the deps-security
+# task 2026-09-17): security-audit is BLOCKING. The scaffold dependency freeze
+# that carried 206 known vulnerabilities in 22 packages was replaced with a
+# minimal, app-scoped pin set; pip-audit and npm audit are clean at flip time.
 #
 # Frontend jobs are resilient to the in-flight CRA→Vite migration: they prefer
 # package-lock.json (npm ci), fall back to yarn.lock (frozen), then plain npm
@@ -182,19 +181,17 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: pip-audit (backend, against the resolved environment)
-        # Advisory: step-level continue-on-error keeps the check run green while
-        # findings stay visible as failed steps here in the run UI. Job-level
-        # continue-on-error would NOT do that — it only shields the workflow,
-        # and the job's check run still goes red. Baseline 2026-09-17: 206 known
-        # vulnerabilities in 22 packages (Emergent scaffold pins); the
-        # backend-hardening task adds CVE triage and removes these flags.
-        continue-on-error: true
+        # Blocking since the 2026-09-17 deps triage: the scaffold freeze that
+        # carried 206 known vulnerabilities in 22 packages was replaced with a
+        # minimal app-scoped pin set (pip-audit clean at flip time). Any new
+        # finding fails this job and blocks merge.
         run: |
           python -m venv /tmp/audit-venv
           /tmp/audit-venv/bin/pip install pip-audit -r backend/requirements.txt
           /tmp/audit-venv/bin/pip-audit
       - name: npm audit (frontend, production deps only)
-        continue-on-error: true
+        # Blocking since the 2026-09-17 deps triage (0 production findings at
+        # flip time; findings now fail the job and block merge).
         run: |
           set -eux
           cd frontend
