@@ -10,14 +10,10 @@ WORKDIR /app
 
 # Dependency layers before source for cache hits on unchanged requirements
 COPY requirements.txt ./
-# Vendored wheel for emergentintegrations==0.1.0 — see vendor/README.md
-COPY vendor/ ./vendor/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv /app/.venv && \
-    uv pip install --python /app/.venv/bin/python \
-        --find-links /app/vendor \
-        -r requirements.txt
+    uv pip install --python /app/.venv/bin/python -r requirements.txt
 
 # ---- Stage 2: runtime — slim, non-root, healthchecked ----
 FROM python:3.12-slim

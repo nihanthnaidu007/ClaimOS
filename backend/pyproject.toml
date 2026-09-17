@@ -11,7 +11,5 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.lint.per-file-ignores]
 # server.py: load_dotenv must run before the database/agents imports (E402 is
 # the deliberate env-then-import pattern); `db` is re-exported for callers (F401).
-# agents.py: unused `asyncio` import is scaffold cruft — the backend-hardening
-# task cleans imports and can drop these ignores.
+# The backend-hardening task cleans this up and can drop the ignore.
 "server.py" = ["E402", "F401"]
-"agents.py" = ["F401"]
