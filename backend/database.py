@@ -1,23 +1,21 @@
-import os
-import logging
-from motor.motor_asyncio import AsyncIOMotorClient
-from dotenv import load_dotenv
-from pathlib import Path
 from datetime import datetime, timezone
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+import structlog
+from motor.motor_asyncio import AsyncIOMotorClient
 
-logger = logging.getLogger(__name__)
+from app.config import settings
 
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logger = structlog.get_logger(__name__)
+
+client = AsyncIOMotorClient(settings.mongo_url, serverSelectionTimeoutMS=10000)
+db = client[settings.db_name]
 
 # Collections
 policies_col = db.policies
 claims_col = db.claims
 claim_documents_col = db.claim_documents
+counters_col = db.counters
+events_col = db.events
 
 SEED_POLICIES = [
     {

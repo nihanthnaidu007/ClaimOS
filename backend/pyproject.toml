@@ -18,3 +18,10 @@ select = ["E4", "E7", "E9", "F"]
 # at import time (database.py raises without MONGO_URL) — the late imports are
 # deliberate load order, not an oversight.
 "server.py" = ["E402"]
+
+[tool.pytest.ini_options]
+# Backend-local runs (`pytest` from backend/) pick up the hardening suite here.
+# The CI workflow invokes pytest from the repo root, where pytest-asyncio's
+# strict default applies; test_durable_state.py carries explicit asyncio markers.
+asyncio_mode = "auto"
+testpaths = ["tests"]
