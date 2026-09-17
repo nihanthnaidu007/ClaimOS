@@ -259,8 +259,10 @@ def test_system_prompt_is_cached_preamble_plus_agent_block():
     assert POLICY_NUMBER not in agents.DECISION_PROMPT
 
 
-def test_per_agent_params_cover_all_five_agents():
-    assert set(AGENT_PARAMS) == {"intake", "policy", "eligibility", "document", "decision"}
+def test_per_agent_params_cover_all_six_agents():
+    assert set(AGENT_PARAMS) == {
+        "intake", "policy", "document", "fraud", "eligibility", "decision"
+    }
     assert AGENT_PARAMS["intake"]["temperature"] == 0.0
     assert AGENT_PARAMS["policy"]["temperature"] == 0.0
     assert AGENT_PARAMS["decision"]["temperature"] > AGENT_PARAMS["eligibility"]["temperature"]

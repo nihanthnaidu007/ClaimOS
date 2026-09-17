@@ -462,9 +462,14 @@ class PipelineRunner:
                 "intake": self.state.get("intake", {}),
                 "policy": {k: v for k, v in self.state.get("policy", {}).items() if k != "policyData"},
                 "documents": self.state.get("documents", {}),
+                "fraud": self.state.get("fraud", {}),
                 "eligibility": self.state.get("eligibility", {}),
                 "decision": self.state.get("decision", {}),
             },
+            # Fraud cross-check outputs: the fingerprint backs future duplicate
+            # matches; the flags drive queue/case badges (schemas.fraud_flags).
+            "incident_fingerprint": self.state.get("fraud", {}).get("fingerprint", ""),
+            "fraud_flags": self.state.get("fraud", {}).get("flags", []),
             "agent_logs": self.state.get("agentLogs", []),
             "holder_name": self.state.get("policy", {}).get("policyData", {}).get("holder_name", ""),
             "is_historical": False,

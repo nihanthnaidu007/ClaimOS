@@ -68,6 +68,7 @@ ALL_STAGES = {
     "INTAKE_AGENT",
     "POLICY_AGENT",
     "DOCUMENT_AGENT",
+    "FRAUD_AGENT",
     "ELIGIBILITY_AGENT",
     "DECISION_AGENT",
 }
@@ -212,10 +213,12 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     assert claim is not None
     assert claim["status"] == "auto_approved"
     assert claim["agent_trace"]["decision"]["verdict"] == "approved"
-    # All five validated outputs stored, Decision citations intact (brief: the
-    # dry-run pipeline emits five validated outputs with citations present).
+    # All six validated outputs stored, Decision citations intact (brief: the
+    # dry-run pipeline emits six validated outputs with citations present;
+    # fraud cross-check stores its deterministic flags with no LLM call when
+    # no duplicate-fingerprint candidates exist).
     assert set(claim["agent_trace"].keys()) == {
-        "intake", "policy", "documents", "eligibility", "decision"
+        "intake", "policy", "documents", "fraud", "eligibility", "decision"
     }
     assert claim["agent_trace"]["decision"]["citations"][0]["sourceRef"]
     assert claim["agent_trace"]["documents"]["consistencyScore"] == 90
@@ -232,8 +235,8 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     # with the runner's bookkeeping event.
     events = await get_claim_events("CLM-FULL-1")
     names = [e["event"] for e in events]
-    assert names.count("agent_start") == 5
-    assert names.count("agent_complete") == 5
+    assert names.count("agent_start") == 6
+    assert names.count("agent_complete") == 6
     assert "stp_finalized" in names
     assert names[-1] == "run_finalized"
 
@@ -305,8 +308,8 @@ async def test_rerun_resumes_from_checkpoints(monkeypatch, patched_mongo):
 
     claim = await database.claims_col.find_one({"id": "CLM-RES-1"})
     assert claim["status"] == "auto_approved"
-    # Trace rebuilt from checkpoints: all five stages present.
-    assert len(claim["agent_logs"]) == 5
+    # Trace rebuilt from checkpoints: all six stages present.
+    assert len(claim["agent_logs"]) == 6
 
 
 async def test_resubmission_after_terminal_run_seeds_next_attempt(

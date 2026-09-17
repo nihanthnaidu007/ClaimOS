@@ -224,6 +224,9 @@ async def seed_database():
     await claims_col.create_index("id", unique=True)
     await claims_col.create_index("policy_number")
     await claim_documents_col.create_index("claim_id")
+    # audit_log: append-only rows are queried per claim (case view) and by time.
+    await audit_log_col.create_index("claim_id")
+    await audit_log_col.create_index("at")
     await events_col.create_index([("claim_id", 1), ("seq", 1)], unique=True)
     # claim_runs: one doc per run attempt; {claim_id, attempt} unique so a
     # concurrent enqueue can never create two runs with the same attempt, and

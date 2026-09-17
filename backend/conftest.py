@@ -50,6 +50,8 @@ def patched_mongo(monkeypatch):
     monkeypatch.setattr(agents, "claims_col", db.claims)
     monkeypatch.setattr(server, "policies_col", db.policies)
     monkeypatch.setattr(server, "claims_col", db.claims)
+    monkeypatch.setattr(server, "claim_documents_col", db.claim_documents)
+    monkeypatch.setattr(server, "audit_log_col", db.audit_log)
     monkeypatch.setattr(server, "db", db)
     return db
 

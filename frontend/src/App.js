@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Outlet, Link, useNavigate } from "react-router-dom";
-import { LogOut, Hexagon } from "lucide-react";
+import { LogOut, Hexagon, BarChart3 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import Dashboard from "@/components/Dashboard";
 import NewClaim from "@/components/NewClaim";
@@ -11,6 +11,7 @@ import { AuthProvider, RequireRole, useAuth } from "@/lib/auth";
 import WorkbenchQueue from "@/components/workbench/WorkbenchQueue";
 import CaseView from "@/components/workbench/CaseView";
 import StatusPortal from "@/components/StatusPortal";
+import OpsAnalytics from "@/components/workbench/OpsAnalytics";
 
 function WorkbenchShell() {
   const { user, logout } = useAuth();
@@ -25,6 +26,13 @@ function WorkbenchShell() {
           </span>
         </Link>
         <div className="flex items-center gap-3">
+          <Link
+            to="/workbench/ops"
+            data-testid="workbench-ops-link"
+            className="inline-flex items-center gap-1.5 text-sm text-[#8b96ab] hover:text-[#e2e8f0] transition-colors"
+          >
+            <BarChart3 className="w-4 h-4" aria-hidden /> Ops Analytics
+          </Link>
           <span className="text-sm text-[#8b96ab]" data-testid="workbench-user">
             {user?.email}
           </span>
@@ -86,6 +94,8 @@ function App() {
           >
             <Route index element={<WorkbenchQueue />} />
             <Route path="claims/:claimId" element={<CaseView />} />
+            {/* Ops analytics: adjuster-only metric groups (spec AC-9). */}
+            <Route path="ops" element={<OpsAnalytics />} />
           </Route>
           {/* Claimant console: unchanged behavior. */}
           <Route path="*" element={<ClaimantConsole />} />

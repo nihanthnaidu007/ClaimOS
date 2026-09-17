@@ -145,6 +145,7 @@ QUEUE_ROW_FIELDS = (
     "created_at",
     "escalation_reason",
     "failure_reason",
+    "fraud_flags",
 )
 
 # Seeded or legacy claim docs may be missing fields the row renders; coerce
@@ -153,6 +154,7 @@ _STRING_FIELDS = frozenset(
     {"id", "policy_number", "holder_name", "incident_type", "status", "created_at"}
 )
 _NUMBER_FIELDS = frozenset({"claimed_amount", "risk_score"})
+_LIST_FIELDS = frozenset({"fraud_flags"})
 
 
 def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
@@ -162,7 +164,7 @@ def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
     for field in QUEUE_ROW_FIELDS:
         value = claim.get(field)
         if value is None:
-            value = 0.0 if field in _NUMBER_FIELDS else ""
+            value = 0.0 if field in _NUMBER_FIELDS else [] if field in _LIST_FIELDS else ""
         row[field] = value
     row["severity"] = severity
     row["sla"] = sla_state(claim.get("created_at"), severity, now=now)
@@ -182,6 +184,7 @@ STAGE_LABELS = {
     "intake": "Intake",
     "policy": "Policy verification",
     "documents": "Document analysis",
+    "fraud": "Fraud cross-check",
     "eligibility": "Eligibility & risk",
     "decision": "Decision",
 }
@@ -233,6 +236,7 @@ def build_case_summary(claim: dict) -> dict:
         "status": claim.get("status", ""),
         "severity": severity,
         "riskScore": claim.get("risk_score", 0.0),
+        "fraudFlags": claim.get("fraud_flags") or [],
         "recommendation": eligibility.get("recommendation") or None,
         "confidence": confidence,
         "eligibility": {

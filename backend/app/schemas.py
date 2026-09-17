@@ -61,6 +61,36 @@ class PolicyRecord(BaseModel):
     covered_events: list[str] = []
 
 
+class FraudFlagOut(BaseModel):
+    """One deterministic fraud cross-check flag (badge on case + queue)."""
+
+    code: str
+    severity: str = "low"  # high | medium | low
+    detail: str = ""
+    evidence: dict[str, Any] = {}
+
+
+# Settlement methods are a closed vocabulary: reports group on this field.
+SETTLEMENT_METHODS = ("bank_transfer", "cheque", "upi", "other")
+
+
+class SettlementCreate(BaseModel):
+    """Record-only settlement facts. No money moves here by design (spec:
+    real payment rails are out of scope); this is the system of record."""
+
+    amount: float = Field(ge=0, le=CLAIMED_AMOUNT_MAX)
+    method: Literal["bank_transfer", "cheque", "upi", "other"]
+    reference: str = Field(default="", max_length=120)
+
+
+class SettlementRecordOut(BaseModel):
+    amount: float
+    method: str
+    reference: str = ""
+    settled_at: str
+    recorded_by: str
+
+
 class ClaimRecord(BaseModel):
     id: str
     policy_number: str = ""
@@ -76,6 +106,10 @@ class ClaimRecord(BaseModel):
     holder_name: str = ""
     is_historical: bool = False
     created_at: str = ""
+    # Fraud cross-check outputs (fraud agent): flags drive the case badge;
+    # the incident fingerprint backs future duplicate detection.
+    fraud_flags: list[FraudFlagOut] = []
+    incident_fingerprint: str = ""
     # Customer-provided contact for milestone notifications; adjuster-visible.
     contact_email: str = ""
     # Public status portal credential (adjuster case view displays it; the
@@ -86,6 +120,8 @@ class ClaimRecord(BaseModel):
     escalation_reason: str | None = None
     # Per-claim LLM usage rollup attached by the worker at finalize.
     usage: dict[str, Any] | None = None
+    # Record-only settlement facts (no payment rails; settlement PR).
+    settlement: Optional[SettlementRecordOut] = None
 
 
 class ClaimPdfResponse(BaseModel):
@@ -102,6 +138,8 @@ class RecentClaimRecord(BaseModel):
     holder_name: Optional[str] = None
     incident_type: str = ""
     created_at: str = ""
+    # Queue badge: non-empty when the fraud cross-check flagged the claim.
+    fraud_flags: list[FraudFlagOut] = []
 
 
 class DashboardStatsResponse(BaseModel):
@@ -130,6 +168,61 @@ class ReadyResponse(BaseModel):
     status: str
     database: str
 
+
+# ---- Ops analytics (Tier 3, AC-9) ----
+
+class CycleTimeStats(BaseModel):
+    p50Seconds: float
+    p95Seconds: float
+    decided: int
+
+
+class StpStats(BaseModel):
+    decided: int
+    autoApproved: int
+    escalated: int
+    rate: float
+
+
+class FraudFlagStats(BaseModel):
+    totalClaims: int
+    flaggedClaims: int
+    rate: float
+
+
+class DecisionCount(BaseModel):
+    status: str
+    count: int
+
+
+class SlaSeverityStats(BaseModel):
+    severity: str
+    slaHours: float
+    decided: int
+    breaches: int
+    breachRate: float
+
+
+class OpsAnalyticsResponse(BaseModel):
+    cycleTime: CycleTimeStats
+    stp: StpStats
+    fraud: FraudFlagStats
+    decisions: list[DecisionCount]
+    sla: dict[str, Any]
+
+
+# ---- Document uploads (Tier 3) ----
+
+class UploadedDocumentResponse(BaseModel):
+    id: str
+    claim_id: str
+    file_name: str
+    content_type: str
+    size_bytes: int
+    storage_key: str
+    uploaded_at: str
+    uploaded_by: str
+    sha256: str
 
 
 # ---- Auth (auth backend PR) ----
@@ -217,6 +310,8 @@ class WorkbenchQueueRow(BaseModel):
     sla: WorkbenchSLA
     escalation_reason: str | None = None
     failure_reason: str | None = None
+    # Queue badge: non-empty when the fraud cross-check flagged the claim.
+    fraud_flags: list[FraudFlagOut] = []
 
 
 class WorkbenchQueueResponse(BaseModel):
@@ -245,6 +340,8 @@ class CaseSummaryResponse(BaseModel):
     status: str
     severity: SEVERITY_VALUES
     riskScore: float = 0.0
+    # Case badge: non-empty when the fraud cross-check flagged the claim.
+    fraudFlags: list[FraudFlagOut] = []
     recommendation: str | None = None
     confidence: float | None = None
     eligibility: dict[str, Any] = {}
@@ -272,6 +369,13 @@ class AuditEntry(BaseModel):
     after: dict[str, Any] = {}
     reason: str
     at: str
+
+
+class SettlementResponse(BaseModel):
+    claimId: str
+    status: str
+    settlement: SettlementRecordOut
+    auditEntry: AuditEntry
 
 
 class OverrideRequest(BaseModel):

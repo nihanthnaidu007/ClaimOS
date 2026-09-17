@@ -481,3 +481,40 @@ def test_audit_endpoint_rejects_customer_role(client, make_authenticated_user):
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 403
+
+
+# ============ Fraud cross-check surfacing (ops PR) ============
+
+
+def test_queue_row_carries_fraud_flags_with_legacy_coercion():
+    """fraud_flags passes through for flagged claims; legacy docs coerce to []."""
+    flag = {
+        "code": "DUPLICATE_INCIDENT_FINGERPRINT",
+        "severity": "high",
+        "detail": "Matches prior claim CLM-PRIOR-1",
+        "evidence": {"duplicate_of_claim_id": "CLM-PRIOR-1"},
+    }
+    row = queue_row({"id": "CLM-F1", "status": "under_review", "fraud_flags": [flag]})
+    assert row["fraud_flags"] == [flag]
+
+    # Seeded/legacy claims have no fraud fields at all — no None leaks.
+    legacy = queue_row({"id": "CLM-L1", "status": "under_review"})
+    assert legacy["fraud_flags"] == []
+
+
+def test_case_summary_exposes_fraud_flags_and_stage():
+    claim = _claim_with_trace()
+    flag = {
+        "code": "IMPOSSIBLE_DATE",
+        "severity": "high",
+        "detail": "Incident date is in the future",
+        "evidence": {},
+    }
+    claim["fraud_flags"] = [flag]
+    summary = build_case_summary(claim)
+
+    assert summary["fraudFlags"] == [flag]
+    # The six-stage timeline includes the fraud cross-check with its label.
+    labels = [stage["label"] for stage in summary["stages"]]
+    assert "Fraud cross-check" in labels
+    assert labels.index("Fraud cross-check") == labels.index("Document analysis") + 1

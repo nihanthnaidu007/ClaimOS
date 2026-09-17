@@ -1,11 +1,22 @@
+import hashlib
 import json
+import uuid
 from datetime import datetime, timezone
 import structlog
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
+from app.analytics import collect_ops_analytics
 from app.auth_routes import router as auth_router
 from app.config import settings
 from app.counters import next_claim_number
@@ -20,21 +31,37 @@ from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
 from app.schemas import (
+    AuditEntry,
     ClaimPdfResponse,
     ClaimRecord,
     ClaimSubmission,
     DashboardStatsResponse,
     HealthResponse,
+    OpsAnalyticsResponse,
     PolicyRecord,
     ReadyResponse,
     RootStatusResponse,
+    SettlementCreate,
+    SettlementResponse,
+    SettlementRecordOut,
     SubmitClaimResponse,
+    UploadedDocumentResponse,
 )
 from app.workbench_routes import router as workbench_router
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.notify_routes import router as notify_router
-from database import claims_col, db, policies_col, seed_database, seed_demo_users
+from app.storage import get_provider, new_storage_key, sanitize_filename
+from agents import PIPELINE_STAGES
+from database import (
+    audit_log_col,
+    claim_documents_col,
+    claims_col,
+    db,
+    policies_col,
+    seed_database,
+    seed_demo_users,
+)
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
 
@@ -258,6 +285,196 @@ async def search_policies(
     return results
 
 
+# ============ DOCUMENTS ============
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _upload_content_type_allowlist() -> set[str]:
+    return {
+        part.strip().lower()
+        for part in settings.upload_allowed_content_types.split(",")
+        if part.strip()
+    }
+
+
+@api_router.post(
+    "/claims/{claim_id}/documents",
+    response_model=UploadedDocumentResponse,
+    status_code=201,
+)
+@limiter.limit("30/minute")
+async def upload_claim_document(
+    claim_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: UserRecord = Depends(require_adjuster),
+):
+    """Attach one document to a claim (spec Tier 3).
+
+    Validation fails closed before storage: 413 over the size cap, 415 on a
+    non-allowlisted content type, 422 for an empty body. Filenames are
+    sanitized to safe basenames; blobs land under the storage provider with
+    a collision-proof per-claim key.
+    """
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in _upload_content_type_allowlist():
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported content type: {content_type or 'unknown'}. "
+            f"Allowed: {settings.upload_allowed_content_types}",
+        )
+
+    max_bytes = settings.upload_max_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {max_bytes} byte upload cap",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    if total == 0:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty")
+
+    file_name = sanitize_filename(file.filename)
+    storage_key = new_storage_key(claim_id, file_name)
+    stored = await get_provider().save(
+        key=storage_key, content=content, content_type=content_type
+    )
+
+    doc = {
+        "id": f"doc_{uuid.uuid4().hex[:12]}",
+        "claim_id": claim_id,
+        "document_type": "upload",
+        "file_name": file_name,
+        "content_type": content_type,
+        "size_bytes": stored.size_bytes,
+        "storage_key": stored.storage_key,
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "uploaded_at": _now(),
+        "uploaded_by": current_user.email,
+    }
+    await claim_documents_col.insert_one(doc.copy())
+    await emit_event(
+        claim_id,
+        {
+            "event": "document_uploaded",
+            "documentId": doc["id"],
+            "fileName": file_name,
+            "contentType": content_type,
+            "sizeBytes": stored.size_bytes,
+            "uploadedBy": current_user.email,
+        },
+    )
+    logger.info("document_uploaded claim_id=%s key=%s", claim_id, storage_key)
+    return UploadedDocumentResponse(**doc)
+
+
+@api_router.get(
+    "/claims/{claim_id}/documents",
+    response_model=list[UploadedDocumentResponse],
+)
+async def list_claim_documents(
+    claim_id: str, current_user: UserRecord = Depends(require_adjuster)
+):
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    docs = (
+        await claim_documents_col.find(
+            {"claim_id": claim_id, "document_type": "upload"}, {"_id": 0}
+        )
+        .sort("uploaded_at", -1)
+        .to_list(100)
+    )
+    return docs
+
+
+# ============ SETTLEMENT (record-only) ============
+
+
+@api_router.post("/claims/{claim_id}/settlement", response_model=SettlementResponse, status_code=201)
+@limiter.limit("30/minute")
+async def record_claim_settlement(
+    claim_id: str,
+    request: Request,
+    body: SettlementCreate,
+    current_user: UserRecord = Depends(require_adjuster),
+):
+    """Record settlement facts on a claim (spec: record-only).
+
+    No money moves and no payment provider is contacted — this endpoint is
+    the system of record: it stamps who recorded what, appends an audit_log
+    row, and emits a durable event for the case timeline.
+    """
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.get("settlement"):
+        raise HTTPException(
+            status_code=409,
+            detail="Settlement already recorded for this claim",
+        )
+
+    record = {
+        "amount": body.amount,
+        "method": body.method,
+        "reference": body.reference.strip(),
+        "settled_at": _now(),
+        "recorded_by": current_user.email,
+    }
+    await claims_col.update_one(
+        {"id": claim_id}, {"$set": {"settlement": record}}
+    )
+
+    # Append-only audit: the settlement's reference doubles as the audit
+    # reason (the why-bearer for a record-only action).
+    audit = AuditEntry(
+        id=f"aud_{uuid.uuid4().hex[:12]}",
+        claim_id=claim_id,
+        actor=current_user.id,
+        actor_email=current_user.email,
+        action="settlement_recorded",
+        before={},
+        after=dict(record),
+        reason=record["reference"] or "Settlement recorded (no reference provided)",
+        at=record["settled_at"],
+    )
+    await audit_log_col.insert_one(audit.model_dump().copy())
+
+    await emit_event(
+        claim_id,
+        {
+            "event": "settlement_recorded",
+            "amount": record["amount"],
+            "method": record["method"],
+            "reference": record["reference"],
+            "recordedBy": record["recorded_by"],
+        },
+    )
+    logger.info(
+        "settlement_recorded claim_id=%s amount=%s method=%s",
+        claim_id,
+        record["amount"],
+        record["method"],
+    )
+    return SettlementResponse(
+        claimId=claim_id,
+        status=claim.get("status", ""),
+        settlement=SettlementRecordOut(**record),
+        auditEntry=audit,
+    )
+
+
 # ============ DASHBOARD ============
 
 @api_router.get("/dashboard/stats", response_model=DashboardStatsResponse)
@@ -295,7 +512,8 @@ async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuste
         await claims_col.find(
             {},
             {"_id": 0, "id": 1, "policy_number": 1, "status": 1, "claimed_amount": 1,
-             "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1},
+             "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1,
+             "fraud_flags": 1},
         )
         .sort("created_at", -1)
         .limit(5)
@@ -319,9 +537,15 @@ async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuste
 
 # ============ HEALTH ============
 
+@api_router.get("/analytics/ops", response_model=OpsAnalyticsResponse)
+async def get_ops_analytics(current_user: UserRecord = Depends(require_adjuster)):
+    """The five ops metric groups (spec Tier 3, AC-9): adjuster-only by role."""
+    return await collect_ops_analytics()
+
+
 @api_router.get("/", response_model=RootStatusResponse)
 async def root():
-    return {"status": "ok", "service": "ClaimOS API", "agents": 5}
+    return {"status": "ok", "service": "ClaimOS API", "agents": len(PIPELINE_STAGES)}
 
 
 @api_router.get("/health", response_model=HealthResponse)

@@ -88,10 +88,46 @@ export const workbenchCaseSummary = {
   source: 'stored agent traces',
 };
 
+export const opsAnalytics = {
+  cycleTime: { p50Seconds: 54000, p95Seconds: 129600, decided: 18 },
+  stp: { decided: 18, autoApproved: 11, escalated: 7, rate: 0.6111111111111112 },
+  fraud: { totalClaims: 27, flaggedClaims: 4, rate: 0.14814814814814814 },
+  decisions: [
+    { status: 'auto_approved', count: 11 },
+    { status: 'escalated', count: 7 },
+    { status: 'pending', count: 6 },
+    { status: 'rejected', count: 3 },
+  ],
+  sla: {
+    bySeverity: [
+      { severity: 'elevated', slaHours: 24, decided: 7, breaches: 2, breachRate: 0.2857142857142857 },
+      { severity: 'low', slaHours: 48, decided: 11, breaches: 0, breachRate: 0 },
+    ],
+  },
+};
+
 export const handlers = [
   http.get(`${API_BASE}/dashboard/stats`, () => HttpResponse.json(dashboardStats)),
   http.get(`${API_BASE}/workbench/queue`, () =>
     HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
+  ),
+  http.get(`${API_BASE}/analytics/ops`, () => HttpResponse.json(opsAnalytics)),
+  http.get(`${API_BASE}/claims/:claimId/documents`, () => HttpResponse.json([])),
+  http.post(`${API_BASE}/claims/:claimId/documents`, () =>
+    HttpResponse.json(
+      {
+        id: 'DOC-NEW-1',
+        claim_id: 'CLM-1001',
+        file_name: 'accident-report.pdf',
+        content_type: 'application/pdf',
+        size_bytes: 324,
+        storage_key: 'claims/CLM-1001/doc-1',
+        uploaded_at: '2026-09-17T10:05:00+00:00',
+        uploaded_by: 'ops-demo@claimos.dev',
+        sha256: 'abc123',
+      },
+      { status: 201 }
+    )
   ),
 ];
 
