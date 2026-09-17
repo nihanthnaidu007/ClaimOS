@@ -317,7 +317,7 @@ function AgentCard({ agentName, status, output, toolsCalled, duration, isLast })
               <div key={i} className="tool-call-line flex items-center gap-2 text-xs font-mono text-[#8892a4] mt-1">
                 <Wrench className="w-3 h-3 text-[#7dd3fc]" />
                 <span className="text-[#7dd3fc]">{tool.tool}</span>
-                <span className="text-[#4a5568]">({tool.input})</span>
+                <span className="text-[#4a5568]">({JSON.stringify(tool.input)})</span>
                 {tool.duration_ms && <span className="text-[#10b981]">✓ {tool.duration_ms}ms</span>}
               </div>
             ))}
@@ -344,16 +344,16 @@ function AgentCard({ agentName, status, output, toolsCalled, duration, isLast })
                   <div key={i} className="tool-call-line flex items-center gap-2 text-xs font-mono text-[#8892a4] mt-0.5">
                     <Wrench className="w-3 h-3 text-[#7dd3fc]" />
                     <span className="text-[#7dd3fc]">{tool.tool}</span>
-                    <span className="text-[#4a5568]">("{tool.input}")</span>
+                    <span className="text-[#4a5568]">({JSON.stringify(tool.input)})</span>
                     <span className="text-[#10b981]">✓ {tool.duration_ms}ms</span>
-                    <span className="text-[#4a5568]">→ {tool.output}</span>
+                    <span className="text-[#4a5568]">→ {JSON.stringify(tool.output)}</span>
                   </div>
                 ))}
               </div>
             )}
 
             {/* Reasoning trace toggle */}
-            {output.reasoning && (
+            {(output.summary || output.reasoning) && (
               <div>
                 <button
                   data-testid={`toggle-trace-${agentName}`}
@@ -366,7 +366,7 @@ function AgentCard({ agentName, status, output, toolsCalled, duration, isLast })
                 {showTrace && (
                   <div className="px-4 pb-3 border-t border-[#1a1f2e]/50">
                     <pre className="text-[11px] font-mono text-[#8892a4] whitespace-pre-wrap leading-relaxed mt-2 bg-[#0a0c12] p-3 rounded-sm border border-[#1a1f2e] max-h-48 overflow-y-auto">
-                      {output.reasoning}
+                      {output.summary || output.reasoning}
                     </pre>
                   </div>
                 )}
@@ -532,7 +532,7 @@ function DecisionPanel({ state, claimId }) {
                 <span className="text-[#8892a4]">Policy Active</span>
               </li>
               <li className="flex items-center gap-2 text-xs font-mono">
-                {policy.coverageCheck?.includes('COVERED') ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981]" /> : <XCircle className="w-3.5 h-3.5 text-[#ef4444]" />}
+                {(policy.coverage === 'covered' || policy.coverageCheck?.includes('COVERED')) ? <CheckCircle2 className="w-3.5 h-3.5 text-[#10b981]" /> : <XCircle className="w-3.5 h-3.5 text-[#ef4444]" />}
                 <span className="text-[#8892a4]">Incident Covered</span>
               </li>
               <li className="flex items-center gap-2 text-xs font-mono">
@@ -557,6 +557,26 @@ function DecisionPanel({ state, claimId }) {
             <div className="p-4">
               <pre className="text-xs font-mono text-[#8892a4] whitespace-pre-wrap leading-relaxed">{decision.letterBody}</pre>
             </div>
+          </div>
+        )}
+
+        {/* Decision Citations (glass-box): driver -> source locator -> plain-language explanation */}
+        {(decision.citations || []).length > 0 && (
+          <div className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm mb-6">
+            <div className="px-4 py-3 border-b border-[#1a1f2e] bg-[#0a0c12]/50">
+              <div className="text-[10px] uppercase tracking-wider text-[#4a5568] font-mono">Decision Citations</div>
+            </div>
+            <ul className="p-4 space-y-2">
+              {decision.citations.map((citation, i) => (
+                <li key={i} className="text-xs font-mono leading-relaxed">
+                  <div className="text-[#e2e8f0]">{i + 1}. {citation.fact}</div>
+                  <div className="text-[#4a5568] mt-0.5">source: {citation.sourceRef}</div>
+                  {citation.customerFriendlyExplanation && (
+                    <div className="text-[#8892a4] mt-0.5">{citation.customerFriendlyExplanation}</div>
+                  )}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

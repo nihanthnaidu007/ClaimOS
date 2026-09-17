@@ -11,10 +11,15 @@ from agents import _claim_frequency_flag
 from app.rating import (
     AUTO_APPROVE,
     AUTO_REJECT,
+    CONTRADICTS,
+    CONSISTENT,
     ESCALATE,
+    NO_DOCUMENTS,
+    PARTIALLY_CONSISTENT,
     base_score_for_claim_size,
     calculate_adjusted_payout,
     compute_risk_assessment,
+    consistency_score_for,
 )
 
 BASE = dict(
@@ -25,7 +30,7 @@ BASE = dict(
     coverage_limit=50000.0,
     deductible=500.0,
     claim_frequency_flag=False,
-    consistency_score=None,
+    consistency=None,
     red_flag_count=0,
 )
 
@@ -97,10 +102,23 @@ def test_over_limit_adds_25_and_breaks_eligibility():
     assert result.eligible is False
 
 
-def test_consistency_bands():
-    assert assessment(consistency_score=45).risk_score == 25  # +20
-    assert assessment(consistency_score=60).risk_score == 15  # +10
-    assert assessment(consistency_score=75).risk_score == 5  # +0
+def test_consistency_categories():
+    """Category -> points: contradicts +20, partially_consistent +10, else +0."""
+    assert assessment(consistency=CONTRADICTS).risk_score == 25  # +20
+    assert assessment(consistency=PARTIALLY_CONSISTENT).risk_score == 15  # +10
+    assert assessment(consistency=CONSISTENT).risk_score == 5  # +0
+    assert assessment(consistency=NO_DOCUMENTS).risk_score == 5  # +0
+    assert assessment(consistency=None).risk_score == 5  # +0
+
+
+def test_consistency_score_for_maps_category_to_ui_score():
+    """The stored numeric score is derived in code, never emitted by the model."""
+    assert consistency_score_for(CONTRADICTS) == 20
+    assert consistency_score_for(PARTIALLY_CONSISTENT) == 60
+    assert consistency_score_for(CONSISTENT) == 90
+    assert consistency_score_for(NO_DOCUMENTS) is None
+    assert consistency_score_for(None) is None
+    assert consistency_score_for("garbage") is None
 
 
 def test_red_flags_cap_at_24_points():
@@ -119,7 +137,7 @@ def test_score_caps_at_100():
         policy_status="suspended",
         incident_type="flood",
         claim_frequency_flag=True,
-        consistency_score=30,
+        consistency=CONTRADICTS,
         red_flag_count=3,
     )
     assert result.risk_score == 100

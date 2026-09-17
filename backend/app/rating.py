@@ -18,8 +18,8 @@ APPLIED_EXPIRED_OR_SUSPENDED = 40
 APPLIED_NOT_COVERED = 35
 APPLIED_OVER_LIMIT = 25
 APPLIED_CLAIM_FREQUENCY = 25
-APPLIED_LOW_CONSISTENCY = 20  # consistency < 50
-APPLIED_BORDERLINE_CONSISTENCY = 10  # consistency 50-70 (inclusive)
+APPLIED_LOW_CONSISTENCY = 20  # document analysis contradicts the claim
+APPLIED_BORDERLINE_CONSISTENCY = 10  # document analysis partially consistent
 APPLIED_PER_RED_FLAG = 8
 RED_FLAG_POINTS_CAP = 24  # 3 red flags max
 BASE_SCORE_MIN = 5
@@ -28,6 +28,30 @@ MAX_RISK_SCORE = 100
 
 _REJECTING_POLICY_STATUSES = {"expired", "suspended"}
 _ACTIVE_POLICY_STATUSES = {"active"}
+
+# Document consistency categories (DocumentAnalysis.consistency). The model
+# outputs a category, never a number (review §4.3); these mappings live in code.
+CONSISTENT = "consistent"
+PARTIALLY_CONSISTENT = "partially_consistent"
+CONTRADICTS = "contradicts"
+NO_DOCUMENTS = "no_documents"
+
+# Numeric UI/evidence-pack score derived per category — chosen so the old
+# eligibility bands still hold: 20 -> +20 points, 60 -> +10 points, 90 -> +0.
+CONSISTENCY_SCORE_BY_CATEGORY = {
+    CONTRADICTS: 20,
+    PARTIALLY_CONSISTENT: 60,
+    CONSISTENT: 90,
+}
+
+
+def consistency_score_for(category: str | None) -> int | None:
+    """Numeric score for the stored document output, derived in code.
+
+    None (no_documents or an unrecognized category) means "no document
+    analysis signal" — downstream scoring skips document evidence.
+    """
+    return CONSISTENCY_SCORE_BY_CATEGORY.get(category) if category else None
 
 
 @dataclass
@@ -81,14 +105,15 @@ def compute_risk_assessment(
     coverage_limit: float,
     deductible: float,
     claim_frequency_flag: bool,
-    consistency_score: int | None,
+    consistency: str | None,
     red_flag_count: int,
 ) -> RiskAssessment:
     """Additive risk formula + routing from the eligibility prompt.
 
-    consistency_score=None means "no document analysis signal" and carries no
-    consistency penalty. An uncovered incident or a non-active policy forces
-    auto_reject regardless of the numeric score.
+    consistency is the Document agent's category: CONTRADICTS adds 20 points,
+    PARTIALLY_CONSISTENT adds 10, and CONSISTENT / NO_DOCUMENTS / None (no
+    document analysis signal) carry no consistency penalty. An uncovered
+    incident or a non-active policy forces auto_reject regardless of the score.
     """
     factors: list[str] = []
     score = base_score_for_claim_size(claimed_amount, coverage_limit)
@@ -111,13 +136,12 @@ def compute_risk_assessment(
         score += APPLIED_CLAIM_FREQUENCY
         factors.append("3+ claims on this policy in the past 12 months")
 
-    if consistency_score is not None:
-        if consistency_score < 50:
-            score += APPLIED_LOW_CONSISTENCY
-            factors.append("Document consistency score below 50")
-        elif consistency_score <= 70:
-            score += APPLIED_BORDERLINE_CONSISTENCY
-            factors.append("Document consistency score 50-70")
+    if consistency == CONTRADICTS:
+        score += APPLIED_LOW_CONSISTENCY
+        factors.append("Document analysis contradicts the claim")
+    elif consistency == PARTIALLY_CONSISTENT:
+        score += APPLIED_BORDERLINE_CONSISTENCY
+        factors.append("Document analysis only partially consistent")
 
     if red_flag_count > 0:
         capped_points = min(red_flag_count, RED_FLAG_POINTS_CAP // APPLIED_PER_RED_FLAG)

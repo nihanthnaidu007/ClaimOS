@@ -233,6 +233,75 @@ def test_non_retryable_error_fails_immediately():
     assert len(adapter._client.messages.parse_calls) == 1
 
 
+def _temperature_deprecation_error():
+    """The real 400 body the API returns for models that deprecate temperature."""
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.BadRequestError(
+        "Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', "
+        "'message': '`temperature` is deprecated for this model.'}}",
+        response=httpx.Response(400, request=request),
+        body=None,
+    )
+
+
+def test_temperature_deprecation_degrades_without_temperature():
+    """A model that deprecates the temperature parameter 400s the first call;
+    the adapter retries immediately without it and remembers the model, so the
+    per-agent temperature feature degrades instead of failing every claim."""
+    adapter = make_adapter(
+        [
+            _temperature_deprecation_error(),
+            FakeParsedMessage(parsed_output=VALID_BOX),
+            FakeParsedMessage(parsed_output=VALID_BOX),
+        ],
+        max_retries=2,
+    )
+
+    result = asyncio.run(
+        adapter.complete_structured(
+            model="claude-sonnet-4-20250514",
+            system="s",
+            messages=[],
+            output_schema=Box,
+            temperature=0.2,
+        )
+    )
+    assert result == VALID_BOX
+
+    calls = adapter._client.messages.parse_calls
+    assert len(calls) == 2
+    assert calls[0]["extra_body"] == {"temperature": 0.2}
+    assert "extra_body" not in calls[1]
+
+    # The deprecation is cached per model: a later call never sends it again.
+    asyncio.run(
+        adapter.complete_structured(
+            model="claude-sonnet-4-20250514",
+            system="s",
+            messages=[],
+            output_schema=Box,
+            temperature=0.2,
+        )
+    )
+    assert "extra_body" not in calls[2]
+
+
+def test_other_bad_requests_still_fail_immediately():
+    """A 400 without the temperature-deprecation message is a real error."""
+    adapter = make_adapter(
+        [sdk_error(anthropic.BadRequestError, 400), FakeParsedMessage(parsed_output=VALID_BOX)],
+        max_retries=3,
+    )
+
+    with pytest.raises(LLMError):
+        asyncio.run(
+            adapter.complete_structured(
+                model="m", system="s", messages=[], output_schema=Box, temperature=0.2
+            )
+        )
+    assert len(adapter._client.messages.parse_calls) == 1
+
+
 # ---------- stream ----------
 
 class FakeStreamHandle:

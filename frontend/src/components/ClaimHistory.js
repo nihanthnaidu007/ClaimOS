@@ -186,7 +186,7 @@ export default function ClaimHistory() {
                             {isOpen && (
                               <div className="px-4 pb-3 border-t border-[#1a1f2e]">
                                 <pre className="text-[11px] font-mono text-[#8892a4] whitespace-pre-wrap leading-relaxed mt-2 max-h-60 overflow-y-auto">
-                                  {trace.reasoning || JSON.stringify(trace, null, 2)}
+                                  {trace.summary || trace.reasoning || JSON.stringify(trace, null, 2)}
                                 </pre>
                               </div>
                             )}
