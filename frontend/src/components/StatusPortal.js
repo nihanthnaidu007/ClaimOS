@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ShieldCheck, Search } from 'lucide-react';
 import axios from 'axios';
 
@@ -19,6 +19,9 @@ export default function StatusPortal() {
   const [notFound, setNotFound] = useState(false);
   const [loading, setLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  // Credential pair captured at the last successful lookup — the poller uses
+  // this snapshot so editing the form mid-poll never breaks the refresh.
+  const [credentials, setCredentials] = useState(null);
 
   const lookup = async (e) => {
     e && e.preventDefault();
@@ -31,6 +34,10 @@ export default function StatusPortal() {
         accessCode: accessCode.trim(),
       });
       setStatus(res.data);
+      setCredentials({
+        claimNumber: claimNumber.trim(),
+        accessCode: accessCode.trim(),
+      });
     } catch (err) {
       setStatus(null);
       if (err.response && err.response.status === 404) {
@@ -44,6 +51,25 @@ export default function StatusPortal() {
       setLoading(false);
     }
   };
+
+  // Live milestone updates: while a looked-up claim's timeline is incomplete,
+  // re-check quietly every 10s (6 lookups/min — well under the per-IP rate
+  // limit). A failed poll keeps the last known timeline; the next tick retries
+  // and explicit errors still surface on manual lookups.
+  useEffect(() => {
+    if (!status || !credentials) return undefined;
+    const milestones = status.milestones || [];
+    if (milestones.length > 0 && milestones.every((m) => m.done)) return undefined;
+    const id = setInterval(async () => {
+      try {
+        const res = await axios.post(`${API}/status/lookup`, credentials);
+        setStatus(res.data);
+      } catch {
+        // Transient poll failure — keep the last known state, retry next tick.
+      }
+    }, 10000);
+    return () => clearInterval(id);
+  }, [status, credentials]);
 
   const downloadLetter = async () => {
     setDownloading(true);
