@@ -29,6 +29,7 @@ complete per-agent reasoning trace.
 |---|---|---|
 | API | FastAPI, REST + hand-rolled SSE | `backend/server.py` |
 | Agents | Five-step orchestrator, tool-first LLM calls | `backend/agents.py` |
+| LLM | Anthropic adapter: structured outputs, retries, usage logging | `backend/app/llm/adapter.py` |
 | Data | MongoDB via Motor, seeded demo data | `backend/database.py` |
 | PDF | fpdf2 decision letters (base64 over JSON) | `backend/pdf_generator.py` |
 | Web | React 19 + CRA/craco, Tailwind, shadcn/radix | `frontend/` |
@@ -67,12 +68,13 @@ vars — the backend loads `backend/.env` on startup.
 | `MONGO_URL` | backend | yes | — | MongoDB connection string |
 | `DB_NAME` | backend | yes | — | Database name |
 | `CORS_ORIGINS` | backend | no | `*` | Comma-separated allowed origins; use an explicit allowlist outside local dev |
+| `ANTHROPIC_API_KEY` | backend | no* | empty | Key for the LLM adapter; the first real LLM call fails closed if unset |
+| `LLM_MAX_RETRIES` | backend | no | `3` | Bounded retries per LLM call |
+| `LLM_TIMEOUT_S` | backend | no | `60` | Per-call timeout in seconds |
 | `REACT_APP_BACKEND_URL` | frontend | yes | `http://localhost:8001` | API base URL, baked into the bundle at build time |
 
-`backend/agents.py` also reads `EMERGENT_LLM_KEY` (legacy LLM wiring, default
-empty). It is intentionally absent from `.env.example` — the Emergent
-integration is being replaced by a provider-neutral LLM adapter, and the key
-must never be committed.
+\* Required in practice: adjudication needs LLM calls, and the adapter refuses
+to run them without a key.
 
 ## Local development
 
@@ -103,6 +105,9 @@ npm start            # dev server on http://localhost:3000
 # Backend lint (ruff config lives in backend/pyproject.toml)
 cd backend && ruff check .
 
+# Backend unit tests (LLM adapter + agents, fully mocked — no MongoDB needed)
+cd backend && pytest -q
+
 # Backend app boots (proves the import graph is intact)
 cd backend && uvicorn server:app --port 8001    # Ctrl-C after the boot banner
 
@@ -110,10 +115,11 @@ cd backend && uvicorn server:app --port 8001    # Ctrl-C after the boot banner
 cd frontend && npm run build
 ```
 
-An automated backend test suite is part of the in-flight production upgrade.
-Until it lands, verify a full loop manually: start the backend, submit a claim
-for a seeded policy number from the UI, and watch the pipeline stream to a
-decision letter.
+The automated suite covers the agent contracts and the LLM adapter (structured
+outputs, retries, fail-closed behavior) with a mocked Anthropic client. End-to-end
+behavior — SSE streaming, PDF letters, seeded data — is still verified manually:
+start the backend, submit a claim for a seeded policy number from the UI, and
+watch the pipeline stream to a decision letter.
 
 ## License
 
