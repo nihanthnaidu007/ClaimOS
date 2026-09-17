@@ -1,0 +1,225 @@
+# CI substrate — 7-job pipeline per the CI/CD research doc (art_O0T4HZMZ).
+#
+# Tracking decision (substrate task todo_QNAl5K7v): security-audit runs
+# advisory-only (step-level continue-on-error — the check stays green while
+# findings surface as failed steps) until the backend-hardening task adds CVE
+# triage; remove the flags and flip it to blocking then. Baseline 2026-09-17:
+# pip-audit reports 206 known vulnerabilities in 22 packages (scaffold pins).
+#
+# Frontend jobs are resilient to the in-flight CRA→Vite migration: they prefer
+# package-lock.json (npm ci), fall back to yarn.lock (frozen), then plain npm
+# install — and invoke package.json scripts rather than tool names.
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  schedule:
+    # Weekly full security pass, Monday 04:17 UTC
+    - cron: "17 4 * * 1"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- 1. backend-ruff ------------------------------------------------------
+  backend-ruff:
+    name: backend-ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff (version pinned in backend/requirements.txt)
+        run: pip install ruff==0.16.8
+      - name: Ruff check
+        run: ruff check backend
+
+  # ---- 2. backend-pytest ----------------------------------------------------
+  backend-pytest:
+    name: backend-pytest
+    runs-on: ubuntu-latest
+    env:
+      MONGO_URL: mongodb://localhost:27017/claimos-test
+      DB_NAME: claimos-test
+      CORS_ORIGINS: http://localhost:3000
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.adminCommand(\"ping\").ok'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          --health-start-period 20s
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt
+      - name: Run pytest (root smoke suite + backend adapter tests)
+        run: pytest tests/ backend/tests/ -v
+
+  # ---- 3. frontend-lint -----------------------------------------------------
+  frontend-lint:
+    name: frontend-lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies (npm ci → yarn frozen → npm install)
+        run: |
+          set -eux
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f yarn.lock ]; then
+            corepack enable && yarn install --frozen-lockfile
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Lint
+        run: |
+          set -eux
+          # Use the package script when present (the Vite migration owns it);
+          # otherwise lint with the committed eslint.config.js.
+          if grep -q '"lint"' package.json; then
+            npm run lint
+          else
+            npx eslint .
+          fi
+
+  # ---- 4. frontend-test -----------------------------------------------------
+  frontend-test:
+    name: frontend-test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install dependencies (npm ci → yarn frozen → npm install)
+        run: |
+          set -eux
+          if [ -f package-lock.json ]; then
+            npm ci
+          elif [ -f yarn.lock ]; then
+            corepack enable && yarn install --frozen-lockfile
+          else
+            npm install --no-audit --no-fund
+          fi
+      - name: Test
+        # No test files exist yet (audit finding); --passWithNoTests keeps the
+        # job green until the Vitest/RTL suites land with the Vite migration.
+        run: CI=true npm test -- --passWithNoTests
+
+  # ---- 5. docker-builds -----------------------------------------------------
+  docker-builds:
+    name: docker-builds
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Compute lowercase image prefix (GHCR requires lowercase)
+        run: echo "IMAGE_PREFIX=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - name: Log in to GHCR (main pushes only)
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.IMAGE_PREFIX }}/api:${{ github.sha }}
+          cache-from: type=gha,scope=backend
+          cache-to: type=gha,scope=backend,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ env.IMAGE_PREFIX }}/web:${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max
+
+  # ---- 6. security-audit ----------------------------------------------------
+  security-audit:
+    name: security-audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: pip-audit (backend, against the resolved environment)
+        # Advisory: step-level continue-on-error keeps the check run green while
+        # findings stay visible as failed steps here in the run UI. Job-level
+        # continue-on-error would NOT do that — it only shields the workflow,
+        # and the job's check run still goes red. Baseline 2026-09-17: 206 known
+        # vulnerabilities in 22 packages (Emergent scaffold pins); the
+        # backend-hardening task adds CVE triage and removes these flags.
+        continue-on-error: true
+        run: |
+          python -m venv /tmp/audit-venv
+          /tmp/audit-venv/bin/pip install pip-audit -r backend/requirements.txt
+          /tmp/audit-venv/bin/pip-audit
+      - name: npm audit (frontend, production deps only)
+        continue-on-error: true
+        run: |
+          set -eux
+          cd frontend
+          if [ -f package-lock.json ]; then
+            npm ci --omit=dev
+            npm audit --omit=dev
+          elif [ -f yarn.lock ]; then
+            corepack enable && yarn install --production --frozen-lockfile
+            yarn audit --groups dependencies
+          else
+            npm install --omit=dev --no-audit --no-fund
+            npm audit --omit=dev
+          fi
+
+  # ---- 7. lint-workflows ----------------------------------------------------
+  lint-workflows:
+    name: lint-workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run actionlint (pinned release, checksum-verified)
+        run: |
+          VERSION=1.7.12
+          curl -fsSL -O "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_checksums.txt"
+          curl -fsSL -o "actionlint_${VERSION}_linux_amd64.tar.gz" "https://github.com/rhysd/actionlint/releases/download/v${VERSION}/actionlint_${VERSION}_linux_amd64.tar.gz"
+          grep "linux_amd64.tar.gz" "actionlint_${VERSION}_checksums.txt" | sha256sum -c -
+          tar -xzf "actionlint_${VERSION}_linux_amd64.tar.gz" actionlint
+          ./actionlint -color

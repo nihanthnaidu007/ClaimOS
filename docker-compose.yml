@@ -1,0 +1,75 @@
+# ClaimOS local stack — mirrors the production topology
+# (api + worker on one backend image, nginx web tier, MongoDB).
+#
+# Run: docker compose up -d --build, then open http://localhost:3000
+# Live agent pipelines need EMERGENT_LLM_KEY in the environment; until the
+# LLM-adapter task lands, the vendored stub raises a clear error on LLM calls.
+
+services:
+  api:
+    build: ./backend
+    image: claimos-api
+    environment:
+      MONGO_URL: mongodb://mongo:27017/claimos
+      DB_NAME: claimos
+      CORS_ORIGINS: http://localhost:3000
+      UPLOAD_DIR: /data/uploads
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    image: claimos-api  # same backend image as api
+    # Placeholder entrypoint — the durable-pipeline task owns the real worker command.
+    command: ["sh", "-c", "exec sleep infinity"]
+    environment:
+      MONGO_URL: mongodb://mongo:27017/claimos
+      DB_NAME: claimos
+      UPLOAD_DIR: /data/uploads
+      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+    volumes:
+      - uploads:/data/uploads
+    depends_on:
+      mongo:
+        condition: service_healthy
+    restart: unless-stopped
+
+  web:
+    build: ./frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+  mongo:
+    image: mongo:7
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  mongodata:
+  uploads:
