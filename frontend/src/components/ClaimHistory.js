@@ -168,6 +168,24 @@ export default function ClaimHistory() {
                     )}
                   </div>
 
+                  {claim.access_code && (
+                    <div
+                      data-testid={`access-code-${claim.id}`}
+                      className="mb-4 border border-amber-500/30 bg-amber-500/5 p-3"
+                    >
+                      <p className="text-xs uppercase tracking-wide text-amber-400 mb-1">
+                        Status portal access code
+                      </p>
+                      <p className="text-[12px] text-[#8892a4] mb-1.5">
+                        Give this to the claimant to unlock the public status page for
+                        this claim only.
+                      </p>
+                      <code className="inline-block bg-[#0a0c12] border border-[#1a1f2e] px-2.5 py-1 font-mono text-xs text-amber-300 select-all">
+                        {claim.access_code}
+                      </code>
+                    </div>
+                  )}
+
                   {claim.agent_trace ? (
                     <div className="space-y-2">
                       {AGENT_NAMES.map(({ key, label }) => {

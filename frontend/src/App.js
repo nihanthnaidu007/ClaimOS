@@ -10,6 +10,7 @@ import ClaimHistory from "@/components/ClaimHistory";
 import { AuthProvider, RequireRole, useAuth } from "@/lib/auth";
 import WorkbenchQueue from "@/components/workbench/WorkbenchQueue";
 import CaseView from "@/components/workbench/CaseView";
+import StatusPortal from "@/components/StatusPortal";
 
 function WorkbenchShell() {
   const { user, logout } = useAuth();
@@ -72,6 +73,8 @@ function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          {/* Public customer status page: standalone layout, no console chrome. */}
+          <Route path="/status" element={<StatusPortal />} />
           {/* Adjuster workbench: standalone surface, adjuster-gated (spec AC-7). */}
           <Route
             path="/workbench"

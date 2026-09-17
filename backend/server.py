@@ -15,7 +15,7 @@ from app.deps import (
     require_authenticated,
     verify_csrf,
 )
-from app.events import tail_claim_events
+from app.events import emit_event, tail_claim_events
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
@@ -31,6 +31,9 @@ from app.schemas import (
     SubmitClaimResponse,
 )
 from app.workbench_routes import router as workbench_router
+from app.status_portal import access_code_hash, generate_access_code
+from app.status_routes import router as status_router
+from app.notify_routes import router as notify_router
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
@@ -132,16 +135,45 @@ async def submit_claim(
     current_user: UserRecord = Depends(require_authenticated),
 ):
     claim_id = await generate_claim_id()
+    access_code = generate_access_code()
+    now = datetime.now(timezone.utc).isoformat()
 
-    # Return claim ID immediately
-    response = {"claimId": claim_id, "message": "Claim queued for processing."}
+    # Seed the claim row at submission (not at worker save time): the public
+    # status page resolves the claim number + access code immediately, and the
+    # worker's full-document replace at run end carries the same credential.
+    await claims_col.insert_one(
+        {
+            "id": claim_id,
+            "policy_number": submission.policyNumber,
+            "claim_date": now,
+            "incident_date": submission.incidentDate,
+            "incident_type": submission.incidentType,
+            "claimed_amount": submission.claimedAmount,
+            "status": "pending",
+            "risk_score": 0,
+            "decision_reason": "",
+            "agent_trace": {},
+            "agent_logs": [],
+            "holder_name": submission.holderName,
+            "contact_email": submission.contactEmail,
+            "is_historical": False,
+            "created_at": now,
+            "access_code": access_code,
+            "access_code_hash": access_code_hash(access_code),
+        }
+    )
 
     # Durable dispatch: the claim_runs row IS the queue. A worker claims it
     # atomically; the API process never executes the pipeline itself.
-    await enqueue_claim_run(claim_id, submission.model_dump())
+    await enqueue_claim_run(claim_id, submission.model_dump(), access_code=access_code)
+    await emit_event(claim_id, {"event": "claim_submitted", "claim_id": claim_id})
     logger.info("claim_submitted", claim_id=claim_id)
 
-    return response
+    return {
+        "claimId": claim_id,
+        "message": "Claim queued for processing.",
+        "accessCode": access_code,
+    }
 
 @api_router.get("/claims", response_model=list[ClaimRecord])
 async def get_claims(current_user: UserRecord = Depends(require_adjuster)):
@@ -313,6 +345,8 @@ async def ready():
 
 api_router.include_router(auth_router)  # /auth/* under the /api prefix
 api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
+api_router.include_router(status_router)  # /status/* public portal endpoints
+api_router.include_router(notify_router)  # /notifications/* authenticated
 app.include_router(api_router)
 
 

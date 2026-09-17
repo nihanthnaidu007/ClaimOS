@@ -22,6 +22,7 @@ import database
 from agents import PIPELINE_STAGES
 from app.config import settings
 from app.events import emit_event
+from app.status_portal import access_code_hash
 from app.stp import assess_claim_severity, evaluate_stp_gate
 from app.usage import UsageLogger
 
@@ -55,7 +56,9 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-async def enqueue_claim_run(claim_id: str, submission: dict) -> dict:
+async def enqueue_claim_run(
+    claim_id: str, submission: dict, access_code: str | None = None
+) -> dict:
     """Insert the first (or next) run for a claim; returns the queued document.
 
     Idempotent while a run is still in flight: if the latest attempt is queued
@@ -65,6 +68,10 @@ async def enqueue_claim_run(claim_id: str, submission: dict) -> dict:
     reached a terminal state. Recovery for runs orphaned in `running` by a
     hard crash is lease/reaper territory — the graceful-shutdown path requeues
     them explicitly.
+
+    `access_code` is the public status portal credential minted at submission;
+    it rides on the run document so `_save_claim` carries it onto the claim
+    row when the worker persists the run's result.
     """
     latest = await database.claim_runs_col.find_one(
         {"claim_id": claim_id}, sort=[("attempt", -1)]
@@ -79,6 +86,7 @@ async def enqueue_claim_run(claim_id: str, submission: dict) -> dict:
         "attempt": attempt,
         "status": RUN_QUEUED,
         "input": submission,
+        "access_code": access_code,
         "stages": checkpoints,
         "failure_reason": None,
         "usage": None,
@@ -461,6 +469,16 @@ class PipelineRunner:
             "holder_name": self.state.get("policy", {}).get("policyData", {}).get("holder_name", ""),
             "is_historical": False,
             "created_at": _now(),
+            # Contact email for milestone notifications; the access code feeds
+            # the public status portal (plaintext for the adjuster case view,
+            # hash for the portal lookup).
+            "contact_email": self.state["input"].get("contactEmail", ""),
+            "access_code": self.run_doc.get("access_code"),
+            "access_code_hash": (
+                access_code_hash(self.run_doc["access_code"])
+                if self.run_doc.get("access_code")
+                else None
+            ),
         }
         if failure_reason:
             claim_doc["failure_reason"] = failure_reason

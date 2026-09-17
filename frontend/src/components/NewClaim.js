@@ -618,6 +618,7 @@ function DecisionPanel({ state, claimId }) {
 export default function NewClaim() {
   const [phase, setPhase] = useState('form'); // form | processing | complete
   const [claimId, setClaimId] = useState(null);
+  const [accessCode, setAccessCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [agents, setAgents] = useState({});
   const [pipelineStatus, setPipelineStatus] = useState('idle');
@@ -641,6 +642,7 @@ export default function NewClaim() {
       
       const newClaimId = res.data.claimId;
       setClaimId(newClaimId);
+      setAccessCode(res.data.accessCode || '');
       setPhase('processing');
       setPipelineStatus('running');
       setAgents({});
@@ -748,6 +750,7 @@ export default function NewClaim() {
   const resetForm = () => {
     setPhase('form');
     setClaimId(null);
+    setAccessCode('');
     setAgents({});
     setPipelineStatus('idle');
     setHaltReason('');
@@ -762,6 +765,27 @@ export default function NewClaim() {
 
       {(phase === 'processing' || phase === 'complete') && (
         <>
+          {accessCode && (
+            <div
+              data-testid="access-code-reveal"
+              className="mt-6 border border-amber-500/40 bg-amber-500/5 p-4"
+            >
+              <p className="text-xs uppercase tracking-wide text-amber-400 mb-1">
+                Customer status access code — show once, store safely
+              </p>
+              <p className="text-[13px] text-stone-300 mb-2">
+                Share this with the claimant: together with claim{' '}
+                <span className="font-mono text-stone-100">{claimId}</span>, it unlocks
+                the public status page at <span className="font-mono text-stone-100">/status</span>.
+              </p>
+              <code
+                data-testid="access-code-value"
+                className="inline-block bg-stone-900 border border-stone-700 px-3 py-1.5 font-mono text-sm text-amber-300 select-all"
+              >
+                {accessCode}
+              </code>
+            </div>
+          )}
           <PipelineBoard
             claimId={claimId}
             agents={agents}
