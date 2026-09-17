@@ -116,6 +116,27 @@ def generate_claim_pdf(state):
         pdf.multi_cell(0, 5, letter_body)
         pdf.ln(4)
     
+    # Decision Citations (glass-box): driver -> source locator -> explanation
+    citations = decision.get('citations', [])
+    if citations:
+        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_text_color(30, 30, 30)
+        pdf.cell(0, 8, 'DECISION CITATIONS', 0, 1)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(3)
+        pdf.set_font('Helvetica', '', 8)
+        for index, citation in enumerate(citations[:10], start=1):
+            pdf.set_text_color(30, 30, 30)
+            pdf.multi_cell(0, 5, f"{index}. {citation.get('fact', '')}")
+            pdf.set_text_color(110, 110, 110)
+            pdf.multi_cell(0, 4, f"   source: {citation.get('sourceRef', '')}")
+            explanation = citation.get('customerFriendlyExplanation', '')
+            if explanation:
+                pdf.multi_cell(0, 4, f"   {explanation}")
+            pdf.ln(1)
+        pdf.ln(3)
+
     # Next steps
     next_steps = decision.get('nextSteps', [])
     if next_steps:
