@@ -155,10 +155,54 @@ Your tasks:
 
 Return the structured output defined by the response schema."""
 
-    user_text = f"Raw claim submission data: {json.dumps(state['input'])}"
+    # The model has no clock: state today's date so "in the past" validation
+    # works for recent incidents instead of reading them as future-dated.
+    user_text = (
+        f"Today's date is {date.today().isoformat()}. "
+        f"Raw claim submission data: {json.dumps(state['input'])}"
+    )
     result = await _complete("intake", system_prompt, user_text, IntakeOutput, state['claimId'])
-    state['intake'] = result.model_dump()
+    state['intake'] = _deterministic_intake_verdict(result).model_dump()
     return state
+
+
+def _deterministic_intake_verdict(output: IntakeOutput) -> IntakeOutput:
+    """Decide intake validity in code, not with the LLM.
+
+    The model normalizes fields and explains its reading; Python enforces the
+    objective rules (required fields, parseable non-future incident date,
+    positive amount). Small models misjudge date comparisons even when told
+    today's date, which would halt otherwise-valid claims at the first gate.
+    """
+    data = output.normalizedData
+    problems: list[str] = []
+    if not data.policyNumber:
+        problems.append("policyNumber is missing")
+    if not data.incidentType:
+        problems.append("incidentType is missing")
+    if not data.description:
+        problems.append("description is missing")
+    try:
+        incident = date.fromisoformat(data.incidentDate)
+    except ValueError:
+        problems.append("incidentDate is not a valid YYYY-MM-DD date")
+    else:
+        if incident > date.today():
+            problems.append(f"incidentDate {data.incidentDate} is in the future")
+    if data.claimedAmount <= 0:
+        problems.append("claimedAmount must be positive")
+    notes = (
+        "All required fields present; incident date and amount valid."
+        if not problems
+        else "; ".join(problems) + "."
+    )
+    return output.model_copy(
+        update={
+            "valid": not problems,
+            "missingFields": output.missingFields if problems else [],
+            "validationNotes": notes,
+        }
+    )
 
 
 async def policy_agent(state):

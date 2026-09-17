@@ -87,6 +87,22 @@ def _intake(valid=True):
     )
 
 
+def _halted_intake():
+    """Model-approved output whose incident date is objectively in the future —
+    only the deterministic verdict can (and must) halt the run on it."""
+    return IntakeOutput(
+        valid=True,
+        normalizedData=NormalizedData(
+            policyNumber=POLICY_NUMBER,
+            incidentDate="2999-01-01",
+            incidentType="theft",
+            claimedAmount=1200.0,
+            description="Parked car broken into; stereo and tools stolen overnight.",
+        ),
+        reasoning="ok",
+    )
+
+
 CLEAN_OUTPUTS = {
     IntakeOutput: _intake(),
     PolicyOutput: PolicyOutput(
@@ -282,7 +298,7 @@ async def test_resubmission_after_terminal_run_seeds_next_attempt(
 ):
     """A terminal run's checkpoints seed attempt N+1's stage map."""
     outputs = dict(CLEAN_OUTPUTS)
-    outputs[IntakeOutput] = _intake(valid=False)  # halts: terminal fast
+    outputs[IntakeOutput] = _halted_intake()  # halts: terminal fast
     _install_adapter(monkeypatch, outputs)
     await _seed_policy()
     await enqueue_claim_run("CLM-ATT-1", dict(SUBMISSION))
@@ -296,9 +312,11 @@ async def test_resubmission_after_terminal_run_seeds_next_attempt(
 
 
 async def test_invalid_intake_halts_as_pending(monkeypatch, patched_mongo):
+    """An objectively invalid intake (future incident date, code-decided) halts
+    the run even when the LLM approved it."""
     await _seed_policy()
     outputs = dict(CLEAN_OUTPUTS)
-    outputs[IntakeOutput] = _intake(valid=False)
+    outputs[IntakeOutput] = _halted_intake()
     _install_adapter(monkeypatch, outputs)
     await enqueue_claim_run("CLM-HALT-1", dict(SUBMISSION))
     claimed = await claim_next_run("worker-a")

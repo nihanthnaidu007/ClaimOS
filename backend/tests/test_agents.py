@@ -178,3 +178,73 @@ def test_refusal_surfaces_typed_error_through_agent(monkeypatch):
         asyncio.run(intake_agent(state))
     # Refusals are deterministic: exactly one attempt.
     assert len(fake_client.messages.parse_calls) == 1
+
+
+def _intake_model(**overrides):
+    base = INTAKE_MODEL.model_dump()
+    base.update(overrides)
+    return IntakeOutput(**base)
+
+
+def _wired_intake(monkeypatch, model):
+    usage = RecordingUsage()
+    monkeypatch.setattr(
+        agents,
+        "adapter",
+        agents.LLMAdapter(client=FakeClient(ScriptedMessages(model)), usage_logger=usage),
+    )
+
+
+def test_intake_validity_is_decided_in_code_not_by_the_model(monkeypatch):
+    """Live-run regression: the intake model called 2026-09-01 'in the future'
+    relative to 2026-09-17 even when told today's date, halting a valid claim.
+    Validity is enforced by _deterministic_intake_verdict, not the model."""
+    hallucinated = _intake_model(
+        valid=False,
+        validationNotes="Incident date 2026-09-01 is in the future relative to today.",
+    )
+    _wired_intake(monkeypatch, hallucinated)
+
+    state = {"claimId": "CLM-DRY-3", "input": {"policyNumber": "AUTO-2024-001847"}}
+    result = asyncio.run(intake_agent(state))
+
+    assert result["intake"]["valid"] is True
+    assert result["intake"]["validationNotes"].startswith("All required fields present")
+
+
+def test_intake_future_date_is_rejected_in_code_even_if_model_approves(monkeypatch):
+    future_model = _intake_model(
+        valid=True,
+        normalizedData={
+            **INTAKE_MODEL.normalizedData.model_dump(),
+            "incidentDate": "2999-01-01",
+        },
+    )
+    _wired_intake(monkeypatch, future_model)
+
+    state = {"claimId": "CLM-DRY-4", "input": {"policyNumber": "AUTO-2024-001847"}}
+    result = asyncio.run(intake_agent(state))
+
+    assert result["intake"]["valid"] is False
+    assert "future" in result["intake"]["validationNotes"]
+
+
+def test_intake_missing_fields_fail_deterministically(monkeypatch):
+    sparse = _intake_model(
+        valid=True,
+        normalizedData={
+            "policyNumber": "",
+            "incidentDate": "",
+            "incidentType": "",
+            "claimedAmount": 0.0,
+            "description": "",
+        },
+    )
+    _wired_intake(monkeypatch, sparse)
+
+    state = {"claimId": "CLM-DRY-5", "input": {"policyNumber": ""}}
+    result = asyncio.run(intake_agent(state))
+
+    assert result["intake"]["valid"] is False
+    assert "policyNumber is missing" in result["intake"]["validationNotes"]
+    assert "claimedAmount must be positive" in result["intake"]["validationNotes"]
