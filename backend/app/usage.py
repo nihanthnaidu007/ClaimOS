@@ -58,3 +58,29 @@ class UsageLogger:
             await collection.insert_one(record)
         except Exception:
             logger.exception("Failed to write LLM usage record to Mongo")
+
+    async def rollup_for_claim(self, claim_id: str) -> dict:
+        """Aggregate one claim's usage records into a rollup summary.
+
+        Returns zeros when no records exist so consumers always see a
+        well-shaped rollup. Called at run finalization; telemetry failures
+        are the caller's concern (see pipeline._finalize_run).
+        """
+        pipeline = [
+            {"$match": {"claim_id": claim_id}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_calls": {"$sum": 1},
+                    "input_tokens": {"$sum": "$input_tokens"},
+                    "output_tokens": {"$sum": "$output_tokens"},
+                    "latency_ms": {"$sum": "$latency_ms"},
+                }
+            },
+        ]
+        rows = await self.collection.aggregate(pipeline).to_list(1)
+        if not rows:
+            return {"total_calls": 0, "input_tokens": 0, "output_tokens": 0, "latency_ms": 0}
+        rollup = rows[0]
+        rollup.pop("_id", None)
+        return rollup

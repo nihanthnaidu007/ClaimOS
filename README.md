@@ -13,13 +13,22 @@ complete per-agent reasoning trace.
 ## How it works
 
 1. **Submit a claim** — policy number, incident details, pasted evidence text.
-2. **Five agents run in sequence**, each a Claude-backed step with a strict
-   JSON contract. Deterministic MongoDB tool calls (policy lookup, claim
-   history) run *before* the LLM and hand it facts, not tool schemas.
+   The API mints a claim ID and enqueues a durable `claim_runs` document; the
+   HTTP response returns immediately.
+2. **A worker process claims the run** (`queued → running` via an atomic
+   `find_one_and_update`) and executes the five agents in sequence, each a
+   Claude-backed step with a strict JSON contract. Deterministic MongoDB tool
+   calls (policy lookup, claim history) run *before* the LLM and hand it facts,
+   not tool schemas. Every finished stage is checkpointed onto the run
+   document; a re-run resumes from the last completed checkpoint instead of
+   re-executing agents.
 3. **Halt semantics** — the pipeline stops after Intake (invalid claim) or
    Policy (policy not found / suspended) and records why.
 4. **Live stream** — every `agent_start` / `agent_complete` / `agent_error`
-   event is pushed to the UI over Server-Sent Events while the pipeline runs.
+   event is appended to the durable `events` collection with a per-claim
+   sequence number. `GET /api/events/streams/{claim_id}` tails that collection:
+   reconnects send `Last-Event-ID` and replay exactly what they missed, and
+   any number of API replicas can serve any client (no in-memory queues).
 5. **Decision letter** — the Decision agent produces a verdict, payout amount,
    and next steps, rendered as a PDF with the reasoning trace.
 
@@ -27,8 +36,9 @@ complete per-agent reasoning trace.
 
 | Layer | Tech | Where |
 |---|---|---|
-| API | FastAPI, REST + hand-rolled SSE | `backend/server.py` |
-| Agents | Five-step orchestrator, tool-first LLM calls | `backend/agents.py` |
+| API | FastAPI, REST + durable SSE | `backend/server.py` |
+| Worker | claim_runs queue consumer, checkpointed pipeline execution | `backend/worker.py`, `backend/pipeline.py` |
+| Agents | Five agent steps, tool-first LLM calls | `backend/agents.py` |
 | LLM | Anthropic adapter: structured outputs, retries, usage logging | `backend/app/llm/adapter.py` |
 | Data | MongoDB via Motor, seeded demo data | `backend/database.py` |
 | PDF | fpdf2 decision letters (base64 over JSON) | `backend/pdf_generator.py` |
@@ -37,14 +47,18 @@ complete per-agent reasoning trace.
 ```
 frontend (Vite dev server, :5173)
    │  POST /api/claims ──────────► FastAPI (:8001)
-   │  GET  /api/claims/stream/{id} ◄── SSE: one event per agent step
+   │                                   └─ enqueues claim_runs (Mongo)
+   │  GET  /api/events/streams/{id} ◄─ SSE: tail of the events collection,
+   │                                     Last-Event-ID replay on reconnect
    ▼
-ClaimOrchestrator ── five agents ──► MongoDB (policies, claims, claim_documents)
+worker (python worker.py) ── claims run atomically ──► five agents
+   └─ checkpoints + events + claim row ──► MongoDB (claim_runs, events, claims)
 ```
 
-The whole pipeline currently runs in one backend process (in-memory SSE queues,
-in-process claim counter, fire-and-forget tasks). Making that state durable is
-a primary goal of the production upgrade.
+Claim state lives in MongoDB, never in a process: the API and the worker are
+separate services built from the same image (different commands — see
+`docker-compose.yml`), so each scales and restarts independently and a worker
+crash loses at most the single stage in flight.
 
 ## Features
 
@@ -71,6 +85,10 @@ vars — the backend loads `backend/.env` on startup.
 | `ANTHROPIC_API_KEY` | backend | no* | empty | Key for the LLM adapter; the first real LLM call fails closed if unset |
 | `LLM_MAX_RETRIES` | backend | no | `3` | Bounded retries per LLM call |
 | `LLM_TIMEOUT_S` | backend | no | `60` | Per-call timeout in seconds |
+| `STP_CONFIDENCE_THRESHOLD` | backend | no | `0.85` | Straight-through gate: Decision confidence at or above this auto-finalizes low-severity, clean-eligibility claims; anything else escalates |
+| `STP_LOW_SEVERITY_AMOUNT` | backend | no | `10000` | Claimed amount at or under this counts as low severity for the STP gate |
+| `STP_LOW_SEVERITY_TYPES` | backend | no | `theft,weather_damage,vandalism` | Comma-separated incident types eligible for low severity |
+| `WORKER_POLL_INTERVAL_S` | backend | no | `1` | Seconds between claim_runs queue polls when the queue is empty |
 | `VITE_API_BASE_URL` | frontend | no | `http://localhost:8001` | API base URL; `VITE_*` vars are exposed to client code at build time — set it for any non-local deployment |
 
 \* Required in practice: adjudication needs LLM calls, and the adapter refuses
@@ -90,6 +108,13 @@ cd backend && uvicorn server:app --reload --port 8001
 ```
 
 The API serves on `http://localhost:8001`; `GET /api/` is a health check.
+
+**Worker** (separate terminal, from the repo root — required for claims to
+actually adjudicate; the API only enqueues):
+
+```bash
+cd backend && python worker.py
+```
 
 **Frontend:**
 

@@ -18,6 +18,7 @@ claims_col = db.claims
 claim_documents_col = db.claim_documents
 counters_col = db.counters
 events_col = db.events
+claim_runs_col = db.claim_runs
 seed_state_col = db.seed_state
 users_col = db.users
 refresh_tokens_col = db.refresh_tokens
@@ -220,6 +221,11 @@ async def seed_database():
     await claims_col.create_index("policy_number")
     await claim_documents_col.create_index("claim_id")
     await events_col.create_index([("claim_id", 1), ("seq", 1)], unique=True)
+    # claim_runs: one doc per run attempt; {claim_id, attempt} unique so a
+    # concurrent enqueue can never create two runs with the same attempt, and
+    # {status, created_at} backs the worker's atomic queue-claim query.
+    await claim_runs_col.create_index([("claim_id", 1), ("attempt", 1)], unique=True)
+    await claim_runs_col.create_index([("status", 1), ("created_at", 1)])
 
     # Marker claim: exactly one caller proceeds to the seeding block.
     try:

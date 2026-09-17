@@ -1,8 +1,11 @@
 """API contract tests: validation 422s, probes, and dashboard golden values.
 
-Route validation is the subject here; the pipeline is stubbed out so no LLM
-is ever contacted.
+Route validation is the subject here; submission only enqueues a durable
+claim_runs document (a worker executes the pipeline), so no LLM is ever
+contacted.
 """
+
+import asyncio
 
 import pytest
 from starlette.testclient import TestClient
@@ -21,20 +24,8 @@ VALID_CLAIM = {
 }
 
 
-class _StubOrchestrator:
-    """Stands in for the LLM pipeline; route behavior is what's under test."""
-
-    def __init__(self, claim_id, queue):
-        self.claim_id = claim_id
-        self.queue = queue
-
-    async def run(self, form_data):
-        return None
-
-
 @pytest.fixture
-def client(patched_mongo, monkeypatch):
-    monkeypatch.setattr(server, "ClaimOrchestrator", _StubOrchestrator)
+def client(patched_mongo):
     with TestClient(server.app) as test_client:  # runs lifespan (seeding)
         yield test_client
 
@@ -58,12 +49,17 @@ def test_root_status(client):
     assert client.get("/api/").json() == {"status": "ok", "service": "ClaimOS API", "agents": 5}
 
 
-def test_valid_submission_gets_claim_id(client, adjuster_headers):
+def test_valid_submission_enqueues_run(client, patched_mongo, adjuster_headers):
     response = client.post("/api/claims", json=VALID_CLAIM, headers=adjuster_headers)
     assert response.status_code == 200
     body = response.json()
     assert body["claimId"].startswith("CLM-")
     assert body["message"]
+    # The claim_runs row is the durable dispatch: exactly one queued attempt.
+    run = asyncio.run(patched_mongo.claim_runs.find_one({"claim_id": body["claimId"]}))
+    assert run is not None
+    assert run["status"] == "queued"
+    assert run["attempt"] == 1
 
 
 def test_missing_required_field_is_422(client, adjuster_headers):

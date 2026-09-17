@@ -83,6 +83,19 @@ class Settings(BaseSettings):
         if info.data.get("environment") == "production" and not value:
             raise ValueError("JWT_SECRET must be set when ENVIRONMENT=production")
         return value
+    # Straight-through-processing gate. A claim whose Decision agent reports
+    # confidence >= stp_confidence_threshold, with low derived severity and a
+    # clean eligibility verdict, auto-finalizes as auto_approved; anything
+    # else is escalated to the workbench with the failing legs as the reason.
+    stp_confidence_threshold: float = 0.85
+    # Severity is derived deterministically (never by the LLM): "low" requires
+    # the claimed amount to be at or under the threshold AND the incident type
+    # to be in the low-severity set (comma-separated env list).
+    stp_low_severity_amount: float = 10_000.0
+    stp_low_severity_types: str = "theft,weather_damage,vandalism"
+
+    # Pipeline worker: seconds between queue polls when the queue is empty.
+    worker_poll_interval_seconds: float = 1.0
 
     @field_validator("cors_origins", mode="before")
     @classmethod

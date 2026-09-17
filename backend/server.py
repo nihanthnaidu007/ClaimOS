@@ -1,4 +1,3 @@
-import asyncio
 import json
 from datetime import datetime, timezone
 import structlog
@@ -7,7 +6,6 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
-from agents import ClaimOrchestrator
 from app.auth_routes import router as auth_router
 from app.config import settings
 from app.counters import next_claim_number
@@ -17,7 +15,7 @@ from app.deps import (
     require_authenticated,
     verify_csrf,
 )
-from app.events import emit_event
+from app.events import tail_claim_events
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
@@ -33,6 +31,7 @@ from app.schemas import (
     SubmitClaimResponse,
 )
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
+from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
 
 app = FastAPI(
@@ -45,9 +44,6 @@ api_router = APIRouter(prefix="/api")
 # Rate limiting: slowapi needs the limiter on app.state; the login/FNOL
 # decorators enforce per-route limits.
 app.state.limiter = limiter
-
-# Store active SSE queues
-sse_queues = {}
 
 configure_logging(settings.environment)
 logger = structlog.get_logger("claimos.server")
@@ -62,39 +58,67 @@ async def generate_claim_id():
     return f"CLM-{date_str}-{seq:03d}"
 
 
-# ============ SSE ENDPOINT ============
+# ============ DURABLE SSE ============
+
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Access-Control-Allow-Origin": "*",
+    "X-Accel-Buffering": "no",
+}
+
+
+def _sse_frame(seq: int, doc: dict) -> str:
+    """SSE frame with a numeric id — the Last-Event-ID replay cursor.
+
+    The stored doc is {event, data, ...}; the frame payload restores the
+    original flat shape ({"event": ..., **data}) so the existing
+    onmessage-based frontend keeps working unchanged.
+    """
+    payload = {"event": doc.get("event", "unknown"), **(doc.get("data") or {})}
+    return f"id: {seq}\ndata: {json.dumps(payload)}\n\n"
+
+
+async def _event_stream(claim_id: str, last_event_id: int):
+    """Tail the claim's durable event log, replaying after last_event_id.
+
+    Served straight from the events collection: any API replica can serve any
+    client, and a reconnect resumes exactly where its Last-Event-ID left off —
+    there is no per-process queue left to lose. The tail yields None as a
+    heartbeat tick when idle and ends itself after a terminal event.
+    """
+    async for tick in tail_claim_events(claim_id, after_seq=last_event_id):
+        if tick is None:
+            yield ": heartbeat\n\n"
+            continue
+        yield _sse_frame(tick["seq"], tick)
+
+
+@api_router.get("/events/streams/{claim_id}")
+async def stream_claim_events(
+    claim_id: str, request: Request, current_user: UserRecord = Depends(require_authenticated)
+):
+    last_event_id = 0
+    header = request.headers.get("last-event-id")
+    if header is not None:
+        try:
+            last_event_id = int(header)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Last-Event-ID must be an integer")
+
+    return StreamingResponse(
+        _event_stream(claim_id, last_event_id),
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
+
 
 @api_router.get("/claims/stream/{claim_id}")
 async def stream_claim(
     claim_id: str, request: Request, current_user: UserRecord = Depends(require_authenticated)
 ):
-    queue = asyncio.Queue()
-    sse_queues[claim_id] = queue
-
-    async def event_generator():
-        try:
-            while True:
-                if await request.is_disconnected():
-                    break
-                try:
-                    data = await asyncio.wait_for(queue.get(), timeout=15.0)
-                    yield f"data: {json.dumps(data)}\n\n"
-                    if data.get("event") in ("pipeline_complete", "pipeline_halted"):
-                        break
-                except asyncio.TimeoutError:
-                    yield f"data: {json.dumps({'event': 'heartbeat'})}\n\n"
-        finally:
-            sse_queues.pop(claim_id, None)
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
-        }
-    )
+    """Compatibility alias for the pre-worker SSE route (same durable stream)."""
+    return await stream_claim_events(claim_id, request)
 
 
 # ============ CLAIMS ============
@@ -109,34 +133,13 @@ async def submit_claim(
     claim_id = await generate_claim_id()
 
     # Return claim ID immediately
-    response = {"claimId": claim_id, "message": "Claim received. Connect to stream endpoint."}
+    response = {"claimId": claim_id, "message": "Claim queued for processing."}
 
-    # Schedule pipeline to run after response is sent
-    async def run_pipeline():
-        await asyncio.sleep(0.5)  # Give client time to connect SSE
-        queue = sse_queues.get(claim_id)
-        if not queue:
-            # Wait a bit more for SSE connection
-            await asyncio.sleep(1.5)
-            queue = sse_queues.get(claim_id)
+    # Durable dispatch: the claim_runs row IS the queue. A worker claims it
+    # atomically; the API process never executes the pipeline itself.
+    await enqueue_claim_run(claim_id, submission.model_dump())
+    logger.info("claim_submitted", claim_id=claim_id)
 
-        if not queue:
-            queue = asyncio.Queue()
-            sse_queues[claim_id] = queue
-
-        orchestrator = ClaimOrchestrator(claim_id, queue)
-        try:
-            await orchestrator.run(submission.model_dump())
-        except Exception as exc:
-            logger.exception("pipeline_failed", claim_id=claim_id, error=str(exc))
-            failure_event = {"event": "pipeline_error", "error": "Internal pipeline error. Please try again."}
-            await queue.put(failure_event)
-            try:
-                await emit_event(claim_id, failure_event)
-            except Exception:
-                logger.exception("event_persist_failed", claim_id=claim_id)
-
-    asyncio.create_task(run_pipeline())
     return response
 
 @api_router.get("/claims", response_model=list[ClaimRecord])
@@ -227,14 +230,19 @@ async def search_policies(
 @api_router.get("/dashboard/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuster)):
     total_claims = await claims_col.count_documents({})
-    approved = await claims_col.count_documents({"status": "approved"})
+    # auto_approved (STP-gated) counts as approved; escalated lands in review.
+    approved = await claims_col.count_documents(
+        {"status": {"$in": ["approved", "auto_approved"]}}
+    )
     rejected = await claims_col.count_documents({"status": "rejected"})
-    under_review = await claims_col.count_documents({"status": {"$in": ["under_review", "escalate"]}})
+    under_review = await claims_col.count_documents(
+        {"status": {"$in": ["under_review", "escalate", "escalated"]}}
+    )
     pending = await claims_col.count_documents({"status": "pending"})
 
     # Get total payout
     pipeline_agg = [
-        {"$match": {"status": "approved"}},
+        {"$match": {"status": {"$in": ["approved", "auto_approved"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$claimed_amount"}}}
     ]
     payout_result = await claims_col.aggregate(pipeline_agg).to_list(1)

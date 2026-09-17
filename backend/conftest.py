@@ -36,6 +36,7 @@ def patched_mongo(monkeypatch):
         "claim_documents_col",
         "counters_col",
         "events_col",
+        "claim_runs_col",
         "seed_state_col",
         "users_col",
         "refresh_tokens_col",

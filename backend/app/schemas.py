@@ -73,6 +73,11 @@ class ClaimRecord(BaseModel):
     holder_name: str = ""
     is_historical: bool = False
     created_at: str = ""
+    # Set when the claim failed or was escalated by the pipeline worker.
+    failure_reason: str | None = None
+    escalation_reason: str | None = None
+    # Per-claim LLM usage rollup attached by the worker at finalize.
+    usage: dict[str, Any] | None = None
 
 
 class ClaimPdfResponse(BaseModel):

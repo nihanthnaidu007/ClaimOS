@@ -30,20 +30,10 @@ def _run(coro):
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:8001"]
 
 
-class _StubOrchestrator:
-    """Route behavior is under test; the LLM pipeline is not."""
-
-    def __init__(self, claim_id, queue):
-        self.claim_id = claim_id
-        self.queue = queue
-
-    async def run(self, form_data):
-        return None
-
-
 @pytest.fixture
 def client(patched_mongo, monkeypatch):
-    monkeypatch.setattr(server, "ClaimOrchestrator", _StubOrchestrator)
+    # No orchestrator stub: claim submission only enqueues a durable run —
+    # the pipeline runs in the worker process, not here.
     # Explicit origin allowlist so the CSRF Origin/Referer check is exercised
     # (a wildcard allowlist bypasses it — that mode is development-only).
     monkeypatch.setattr(settings, "cors_origins", list(ALLOWED_ORIGINS))
@@ -202,6 +192,7 @@ PROTECTED_GETS = [
     "/api/claims/CLM-X",
     "/api/claims/CLM-X/pdf",
     "/api/claims/stream/CLM-X",
+    "/api/events/streams/CLM-X",
     "/api/policies",
     "/api/policies/lookup?policy_number=AUTO-2024-001847",
     "/api/policies/search?q=auto",
