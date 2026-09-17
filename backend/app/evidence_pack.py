@@ -11,6 +11,7 @@ import io
 from datetime import datetime, timezone
 
 from fpdf import FPDF
+from fpdf.enums import XPos, YPos
 
 # Core fpdf fonts are latin-1 only; LLM output can contain any unicode, so
 # every string is normalized before it reaches the renderer.
@@ -79,13 +80,15 @@ class EvidencePackPDF(FPDF):
         self.ln(2)
         self.set_font("Helvetica", "B", 11)
         self.set_text_color(30, 30, 30)
-        self.cell(0, 8, f"  {title}", 0, 1, "L", True)
+        self.cell(0, 8, f"  {title}", new_x=XPos.LMARGIN, new_y=YPos.NEXT, fill=True)
         self.ln(1)
 
     def field_line(self, label: str, value: str):
         self.set_font("Helvetica", "", 9)
         self.set_text_color(50, 50, 50)
-        self.multi_cell(0, 5, _clean(f"{label}: {value}"))
+        # fpdf2 leaves multi_cell's cursor at the right margin by default —
+        # without an explicit reset the next full-width cell has no space.
+        self.multi_cell(0, 5, _clean(f"{label}: {value}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def kv_dict(self, data: dict, indent: str = "  "):
         for key, value in data.items():
@@ -144,7 +147,7 @@ class EvidencePackPDF(FPDF):
             label = log.get("label") or name.replace("_", " ").title()
             self.set_font("Helvetica", "B", 10)
             self.set_text_color(30, 30, 30)
-            self.cell(0, 7, f"{label}", 0, 1)
+            self.cell(0, 7, f"{label}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             parts = []
             if log.get("status"):
                 parts.append(f"status: {log['status']}")
@@ -155,7 +158,7 @@ class EvidencePackPDF(FPDF):
             if parts:
                 self.set_font("Helvetica", "I", 8)
                 self.set_text_color(100, 100, 100)
-                self.cell(0, 5, _clean("  |  ".join(parts)), 0, 1)
+                self.cell(0, 5, _clean("  |  ".join(parts)), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             if log.get("error"):
                 self.field_line("Error", log["error"])
             if agent_trace:
@@ -171,13 +174,13 @@ class EvidencePackPDF(FPDF):
             self.section_title("DECISION LETTER")
             self.set_font("Helvetica", "", 9)
             self.set_text_color(50, 50, 50)
-            self.multi_cell(0, 5, _clean(letter))
+            self.multi_cell(0, 5, _clean(letter), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         if next_steps:
             self.section_title("NEXT STEPS")
             self.set_font("Helvetica", "", 9)
             self.set_text_color(50, 50, 50)
             for i, step in enumerate(next_steps, 1):
-                self.multi_cell(0, 5, _clean(f"{i}. {step}"))
+                self.multi_cell(0, 5, _clean(f"{i}. {step}"), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
     def _run_history(self):
         self.section_title("RUN HISTORY")
@@ -205,7 +208,7 @@ class EvidencePackPDF(FPDF):
             row = f"#{doc.get('seq', '?')} {doc.get('event', '?')} — {summary}"
             self.set_font("Courier", "", 7)
             self.set_text_color(60, 60, 60)
-            self.multi_cell(0, 4, _clean(row[:160]))
+            self.multi_cell(0, 4, _clean(row[:160]), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
 def generate_evidence_pack(claim: dict, events: list[dict], runs: list[dict]) -> str:
