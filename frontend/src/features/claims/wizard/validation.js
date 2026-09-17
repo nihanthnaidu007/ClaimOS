@@ -3,6 +3,19 @@
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// Canonical lookup verdict, derived from the usePolicyLookup hook result.
+// Single source of truth for the inline chip (PolicyLookupField) and the
+// validation gate (validateHolder) — the backend answers 404 for unknown
+// numbers and PolicyRecord carries snake_case fields with a string status.
+export function lookupVerdict(lookup) {
+  if (!lookup || (!lookup.isPending && !lookup.isError && !lookup.notFound && !lookup.data)) return 'idle';
+  if (lookup.notFound) return 'notfound';
+  if (lookup.isPending) return 'pending';
+  if (lookup.isError) return 'error';
+  if (!lookup.data || lookup.data.status !== 'active') return 'inactive';
+  return 'found';
+}
+
 export function validateIncident(draft) {
   const errors = {};
   if (!draft.incidentType) errors.incidentType = 'Select the incident type';
@@ -30,10 +43,13 @@ export function validateHolder(draft, lookup) {
   const num = (draft.policyNumber || '').trim();
   if (!num) {
     errors.policyNumber = 'Policy number is required';
-  } else if (lookup?.status === 'notfound') {
-    errors.policyNumber = `No policy found for ${num}`;
-  } else if (lookup?.status === 'found' && !lookup.data?.active) {
-    errors.policyNumber = 'This policy is not active';
+  } else {
+    const verdict = lookupVerdict(lookup);
+    if (verdict === 'notfound') {
+      errors.policyNumber = `No policy found for ${num}`;
+    } else if (verdict === 'inactive') {
+      errors.policyNumber = 'This policy is not active';
+    }
   }
   if (!draft.holderName || draft.holderName.trim().length < 2) {
     errors.holderName = 'Full name is required';

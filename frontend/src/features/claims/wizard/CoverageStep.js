@@ -4,15 +4,18 @@
 // lookup query result from the wizard.
 import { Shield, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { formatDollars } from '../constants';
+import { lookupVerdict } from './validation';
 
 export default function CoverageStep({ draft, lookup }) {
+  const verdict = lookupVerdict(lookup);
   const policy = lookup?.data;
   const cost = Number(draft.estimatedCost) || 0;
-  const limit = policy?.coverageLimit || 0;
+  const limit = policy?.coverage_limit || 0;
   const deductible = policy?.deductible || 0;
+  const active = policy?.status === 'active';
   const withinLimit = limit > 0 && cost <= limit;
 
-  if (lookup?.isPending || !policy?.found) {
+  if (lookup?.isPending || (verdict !== 'found' && verdict !== 'inactive')) {
     return (
       <div className="space-y-4" data-testid="wizard-step-2">
         <BlankNotice>
@@ -28,19 +31,19 @@ export default function CoverageStep({ draft, lookup }) {
         <div className="flex items-center gap-2 mb-3">
           <Shield className="w-4 h-4 text-[#7dd3fc]" />
           <span className="text-sm font-semibold text-[#e2e8f0]" style={{ fontFamily: 'Space Grotesk' }}>
-            Policy {policy.policyNumber}
+            Policy {policy.policy_number}
           </span>
           <span className={`text-[10px] font-mono px-2 py-0.5 border ${
-            policy.active ? 'text-[#10b981] border-[#10b981]/40' : 'text-[#ef4444] border-[#ef4444]/40'
+            active ? 'text-[#10b981] border-[#10b981]/40' : 'text-[#ef4444] border-[#ef4444]/40'
           }`}>
-            {policy.active ? 'ACTIVE' : 'INACTIVE'}
+            {active ? 'ACTIVE' : 'INACTIVE'}
           </span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs font-mono">
-          <Stat label="Policy Holder" value={policy.holderName} />
+          <Stat label="Policy Holder" value={policy.holder_name} />
           <Stat label="Coverage Limit" value={formatDollars(limit)} />
           <Stat label="Deductible" value={formatDollars(deductible)} />
-          <Stat label="Effective" value={policy.effectiveDate || '—'} />
+          <Stat label="Policy Type" value={policy.policy_type} />
         </div>
       </div>
 
@@ -48,8 +51,8 @@ export default function CoverageStep({ draft, lookup }) {
         <div className="text-[10px] uppercase tracking-wider text-[#4a5568] font-mono mb-3">Coverage Math for This Claim</div>
         <ul className="space-y-2 text-xs font-mono">
           <MathRow
-            ok={policy.active}
-            text={policy.active ? 'Policy is active — claim can be adjudicated automatically.' : 'Policy is inactive — your claim will be escalated for manual review.'}
+            ok={active}
+            text={active ? 'Policy is active — claim can be adjudicated automatically.' : 'Policy is inactive — your claim will be escalated for manual review.'}
           />
           <MathRow
             ok={withinLimit}
@@ -66,12 +69,12 @@ export default function CoverageStep({ draft, lookup }) {
         </ul>
       </div>
 
-      {!policy.active && (
+      {!active && (
         <Notice tone="warn" icon={AlertTriangle}>
           Submitting against an inactive policy skips straight-through processing — a human adjuster will review it.
         </Notice>
       )}
-      {policy.active && withinLimit && (
+      {active && withinLimit && (
         <Notice tone="ok" icon={CheckCircle2}>
           This claim looks eligible for straight-through processing after document review.
         </Notice>

@@ -11,6 +11,7 @@ export default function PolicyHolderStep({ draft, update, errors, lookup }) {
         value={draft.policyNumber}
         onChange={(v) => update({ policyNumber: v })}
         error={errors.policyNumber}
+        lookup={lookup}
       />
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

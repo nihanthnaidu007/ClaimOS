@@ -1,9 +1,11 @@
 // Live policy-number lookup field (presentational): renders the verdict chip
 // and coverage facts from the lookup query the wizard owns. Feedback must be
 // inline (UX bar) — the user never waits for a submit round-trip to learn a
-// number is dead.
+// number is dead. Verdicts come from the shared lookupVerdict helper so the
+// validation gate and this chip can never disagree.
 import { CheckCircle2, XCircle, Loader2, Shield } from 'lucide-react';
 import { formatDollars } from '../constants';
+import { lookupVerdict } from './validation';
 
 const VERDICT_META = {
   pending: { text: 'Checking policy…', cls: 'text-[#f59e0b]' },
@@ -12,18 +14,8 @@ const VERDICT_META = {
   inactive: { text: 'Policy is not active', cls: 'text-[#ef4444]' },
 };
 
-function verdictFor(lookup, value) {
-  if (!value.trim()) return null;
-  if (lookup?.isPending) return 'pending';
-  if (lookup?.isError) return 'error';
-  if (lookup?.data?.found === false) return 'notfound';
-  if (lookup?.data?.found && !lookup.data.active) return 'inactive';
-  if (lookup?.data?.found) return 'found';
-  return null;
-}
-
 export default function PolicyLookupField({ value, onChange, error, lookup }) {
-  const verdict = verdictFor(lookup, value);
+  const verdict = lookupVerdict(lookup);
   const meta = verdict && VERDICT_META[verdict];
   const policy = lookup?.data;
 
@@ -57,24 +49,24 @@ export default function PolicyLookupField({ value, onChange, error, lookup }) {
         <p className={`text-xs font-mono mt-1.5 ${meta.cls}`} data-testid="policy-number-feedback">{meta.text}</p>
       )}
 
-      {/* Inline coverage facts once the policy resolves */}
-      {verdict === 'found' && policy && (
+      {/* Inline coverage facts once the policy resolves (PolicyRecord fields) */}
+      {(verdict === 'found' || verdict === 'inactive') && policy && (
         <div
           className="mt-3 bg-[#10b981]/5 border border-[#10b981]/30 rounded-sm p-3 grid grid-cols-2 md:grid-cols-4 gap-2 text-xs font-mono"
           data-testid="policy-found-panel"
         >
-          <Fact label="Holder" value={policy.holderName} />
-          <Fact label="Coverage" value={policy.coverageLimit ? formatDollars(policy.coverageLimit) : '—'} />
+          <Fact label="Holder" value={policy.holder_name} />
+          <Fact label="Coverage" value={policy.coverage_limit ? formatDollars(policy.coverage_limit) : '—'} />
           <Fact label="Deductible" value={policy.deductible ? formatDollars(policy.deductible) : '—'} />
           <Fact
             label="Status"
-            value={policy.active ? 'ACTIVE' : 'INACTIVE'}
-            valueCls={policy.active ? 'text-[#10b981]' : 'text-[#ef4444]'}
+            value={policy.status === 'active' ? 'ACTIVE' : 'INACTIVE'}
+            valueCls={policy.status === 'active' ? 'text-[#10b981]' : 'text-[#ef4444]'}
           />
         </div>
       )}
 
-      {verdict === 'found' && !policy?.active && (
+      {verdict === 'inactive' && (
         <p className="text-xs font-mono text-[#f59e0b] mt-2 flex items-center gap-1.5">
           <Shield className="w-3 h-3" /> Claims on inactive policies will be escalated, not auto-processed.
         </p>
