@@ -34,7 +34,11 @@ def test_app_boots_and_serves_root():
 
 def test_core_api_surface_is_mounted():
     """Claims, policies, dashboard, and SSE stream routes are registered."""
-    paths = {route.path for route in server.app.routes}
+    # Derive the route table from the OpenAPI schema rather than iterating
+    # app.routes: newer FastAPI wraps include_router() output in a lazy
+    # _IncludedRouter object with no .path attribute, so flat enumeration
+    # raises AttributeError. openapi() is the public, version-stable surface.
+    paths = set(server.app.openapi()["paths"])
     expected = {
         "/api/claims",
         "/api/claims/stream/{claim_id}",
