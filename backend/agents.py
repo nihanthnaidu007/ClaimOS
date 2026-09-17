@@ -1,53 +1,99 @@
-import os
 import json
-import asyncio
 import logging
 import time
 from datetime import datetime, timezone
-from dotenv import load_dotenv
 from pathlib import Path
-from emergentintegrations.llm.chat import LlmChat, UserMessage
-from database import policies_col, claims_col
+
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+from app.llm.adapter import LLMAdapter, get_adapter
+from database import claims_col, policies_col
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
 logger = logging.getLogger(__name__)
 
-API_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+# Process-wide adapter; tests rebind this attribute to inject a mocked client.
+adapter: LLMAdapter = get_adapter()
 
 
-def parse_json_response(text):
-    """Parse JSON from LLM response, handling markdown code blocks."""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        lines = lines[1:]  # remove first ```json line
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}") + 1
-        if start != -1 and end > start:
-            return json.loads(text[start:end])
-        raise
+# ============ AGENT OUTPUT MODELS ============
+# Field names are camelCase so the stored agent trace and SSE payloads keep the
+# exact shape the pipeline emitted before the adapter migration.
+
+class NormalizedData(BaseModel):
+    policyNumber: str = ""
+    incidentDate: str = ""
+    incidentType: str = ""
+    claimedAmount: float = 0.0
+    description: str = ""
 
 
-async def call_claude(system_prompt, user_message_text, session_id):
-    """Call Claude via emergentintegrations."""
-    chat = LlmChat(
-        api_key=API_KEY,
-        session_id=session_id,
-        system_message=system_prompt
+class IntakeOutput(BaseModel):
+    valid: bool
+    normalizedData: NormalizedData
+    missingFields: list[str] = Field(default_factory=list)
+    validationNotes: str = ""
+    reasoning: str = ""
+
+
+class PolicyOutput(BaseModel):
+    found: bool
+    statusCheck: str = ""
+    coverageCheck: str = ""
+    withinLimits: bool = False
+    adjustedPayout: float = 0.0
+    deductibleApplied: float = 0.0
+    claimFrequencyFlag: bool = False
+    reasoning: str = ""
+
+
+class ExtractedFacts(BaseModel):
+    datesFound: list[str] = Field(default_factory=list)
+    locationMentioned: str = ""
+    partiesInvolved: str = ""
+    damageDescribed: str = ""
+    amountsMentioned: list[float] = Field(default_factory=list)
+
+
+class DocumentOutput(BaseModel):
+    extracted: ExtractedFacts
+    consistencyScore: int = 0
+    redFlags: list[str] = Field(default_factory=list)
+    supportingEvidence: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+class EligibilityOutput(BaseModel):
+    eligible: bool
+    riskScore: int = 0
+    riskFactors: list[str] = Field(default_factory=list)
+    fraudIndicators: list[str] = Field(default_factory=list)
+    recommendation: str = ""
+    reasoning: str = ""
+
+
+class DecisionOutput(BaseModel):
+    verdict: str
+    payoutAmount: float = 0.0
+    letterSubject: str = ""
+    letterBody: str = ""
+    nextSteps: list[str] = Field(default_factory=list)
+    reasoning: str = ""
+
+
+async def _complete(agent, system_prompt, user_text, output_schema, claim_id):
+    """One schema-constrained LLM call for an agent; returns the validated model."""
+    return await adapter.complete_structured(
+        model=adapter.model_for(agent),
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_text}],
+        output_schema=output_schema,
+        agent=agent,
+        claim_id=claim_id,
     )
-    chat.with_model("anthropic", "claude-4-sonnet-20250514")
-    
-    user_msg = UserMessage(text=user_message_text)
-    response = await chat.send_message(user_msg)
-    return parse_json_response(response)
 
 
 # ============ TOOL FUNCTIONS ============
@@ -89,18 +135,11 @@ Your tasks:
 4. Flag issues: future dates, unrealistically high amounts (>$500,000), empty descriptions (<20 chars)
 5. If all required fields present and valid, mark as valid. If critical fields missing, mark invalid.
 
-Respond ONLY with this exact JSON structure, no markdown, no backticks:
-{
-  "valid": true,
-  "normalizedData": { "policyNumber": "...", "incidentDate": "YYYY-MM-DD", "incidentType": "...", "claimedAmount": 0.00, "description": "..." },
-  "missingFields": [],
-  "validationNotes": "All fields present and valid. Date normalized, amount validated.",
-  "reasoning": "Step 1: Checked required fields... Step 2: Validated... Step 3:... Conclusion - claim submission is VALID/INVALID."
-}"""
+Return the structured output defined by the response schema."""
 
     user_text = f"Raw claim submission data: {json.dumps(state['input'])}"
-    result = await call_claude(system_prompt, user_text, f"intake-{state['claimId']}")
-    state['intake'] = result
+    result = await _complete("intake", system_prompt, user_text, IntakeOutput, state['claimId'])
+    state['intake'] = result.model_dump()
     return state
 
 
@@ -157,26 +196,17 @@ Analyze:
 4. Calculate: adjustedPayout = claimedAmount - deductible (if within limit), or coverage_limit - deductible (if over limit)
 5. Claim frequency — if 3+ claims in past 12 months, flag it
 
-Respond ONLY with raw JSON:
-{
-  "found": true,
-  "statusCheck": "ACTIVE/EXPIRED/SUSPENDED — details...",
-  "coverageCheck": "COVERED/NOT COVERED — details...",
-  "withinLimits": true,
-  "adjustedPayout": 0.00,
-  "deductibleApplied": 0.00,
-  "claimFrequencyFlag": false,
-  "reasoning": "Step 1:... Step 2:... CONCLUSION: Policy verification PASSED/FAILED."
-}"""
+Return the structured output defined by the response schema."""
 
     normalized = state['intake'].get('normalizedData', {})
     user_text = f"""Policy lookup result: {json.dumps(policy_data)}
 Claim history result: {json.dumps(history_result['claims'])}
 Submitted claim data - incident date: {normalized.get('incidentDate', '')}, incident type: {normalized.get('incidentType', '')}, claimed amount: {normalized.get('claimedAmount', 0)}"""
     
-    result = await call_claude(system_prompt, user_text, f"policy-{state['claimId']}")
-    result['policyData'] = policy_data
-    state['policy'] = result
+    result = await _complete("policy", system_prompt, user_text, PolicyOutput, state['claimId'])
+    policy_result = result.model_dump()
+    policy_result['policyData'] = policy_data
+    state['policy'] = policy_result
     return state
 
 
@@ -198,20 +228,7 @@ Tasks:
 
 Scoring: consistencyScore 0-100.
 
-Respond ONLY with raw JSON:
-{
-  "extracted": {
-    "datesFound": [],
-    "locationMentioned": "",
-    "partiesInvolved": "",
-    "damageDescribed": "",
-    "amountsMentioned": []
-  },
-  "consistencyScore": 85,
-  "redFlags": [],
-  "supportingEvidence": [],
-  "reasoning": "Step 1:... ConsistencyScore: X/100."
-}"""
+Return the structured output defined by the response schema."""
 
     normalized = state['intake'].get('normalizedData', {})
     doc_text = state['input'].get('documentText', '')
@@ -219,8 +236,8 @@ Respond ONLY with raw JSON:
 Supporting document text: {doc_text if doc_text else 'No additional documents submitted.'}
 Submitted claim data: incident date={normalized.get('incidentDate', '')}, incident type={normalized.get('incidentType', '')}, claimed amount=${normalized.get('claimedAmount', 0)}, policy type={state.get('policy', {}).get('policyData', {}).get('policy_type', 'unknown')}"""
     
-    result = await call_claude(system_prompt, user_text, f"docs-{state['claimId']}")
-    state['documents'] = result
+    result = await _complete("document", system_prompt, user_text, DocumentOutput, state['claimId'])
+    state['documents'] = result.model_dump()
     return state
 
 
@@ -247,15 +264,7 @@ ROUTING:
 ELIGIBILITY:
 - eligible = true only if: policy active, incident covered, amount within limits
 
-Respond ONLY with raw JSON:
-{
-  "eligible": true,
-  "riskScore": 18,
-  "riskFactors": [],
-  "fraudIndicators": [],
-  "recommendation": "auto_approve",
-  "reasoning": "Comprehensive analysis:... TOTAL RISK SCORE: X/100. RECOMMENDATION: ..."
-}"""
+Return the structured output defined by the response schema."""
 
     user_text = f"""Prior agent outputs:
 INTAKE: {json.dumps(state['intake'])}
@@ -263,8 +272,8 @@ POLICY: {json.dumps({k: v for k, v in state['policy'].items() if k != 'policyDat
 Policy Data: status={state['policy'].get('policyData', {}).get('status', 'unknown')}, coverage_limit={state['policy'].get('policyData', {}).get('coverage_limit', 0)}, deductible={state['policy'].get('policyData', {}).get('deductible', 0)}
 DOCUMENTS: {json.dumps(state['documents'])}"""
     
-    result = await call_claude(system_prompt, user_text, f"eligibility-{state['claimId']}")
-    state['eligibility'] = result
+    result = await _complete("eligibility", system_prompt, user_text, EligibilityOutput, state['claimId'])
+    state['eligibility'] = result.model_dump()
     return state
 
 
@@ -287,15 +296,7 @@ LETTER REQUIREMENTS:
 - For approvals: include exact payout amount after deductible
 - Sign as "ClaimOS Claims Processing Team"
 
-Respond ONLY with raw JSON:
-{{
-  "verdict": "approved/rejected/under_review",
-  "payoutAmount": 0.00,
-  "letterSubject": "Your Claim ... Has Been ...",
-  "letterBody": "Dear ...",
-  "nextSteps": [],
-  "reasoning": "Verdict determination:..."
-}}"""
+Return the structured output defined by the response schema."""
 
     user_text = f"""All agent outputs:
 INTAKE: {json.dumps(state['intake'])}
@@ -306,12 +307,12 @@ Claim ID: {state['claimId']}
 Policy Number: {policy_data.get('policy_number', '')}
 Holder Name: {holder_name}"""
     
-    result = await call_claude(system_prompt, user_text, f"decision-{state['claimId']}")
+    result = await _complete("decision", system_prompt, user_text, DecisionOutput, state['claimId'])
     
     # Mock email (always false as user requested)
-    result['emailSent'] = False
-    
-    state['decision'] = result
+    decision = result.model_dump()
+    decision['emailSent'] = False
+    state['decision'] = decision
     return state
 
 
@@ -421,7 +422,7 @@ class ClaimOrchestrator:
                     })
                     break
                     
-            except Exception as err:
+            except Exception as err:  # noqa: BLE001 — one bad agent must not kill the stream
                 duration = int((time.time() - start_time) * 1000)
                 log_entry["status"] = "error"
                 log_entry["endTime"] = datetime.now(timezone.utc).isoformat()
@@ -485,5 +486,5 @@ class ClaimOrchestrator:
             
             await claims_col.insert_one(claim_doc)
             logger.info(f"Claim {self.state['claimId']} saved to database")
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 — persistence failure is logged, not raised
             logger.error(f"Error saving claim: {e}")
