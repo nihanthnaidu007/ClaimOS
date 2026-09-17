@@ -5,6 +5,7 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { http, HttpResponse } from 'msw';
 import CaseView from './CaseView';
+import api from '@/lib/api';
 import { server, workbenchCaseSummary } from '../../test/handlers';
 
 const API_BASE = `${import.meta.env.VITE_API_BASE_URL}/api`;
@@ -152,5 +153,71 @@ describe('CaseView', () => {
 
     await waitFor(() => expect(screen.getByTestId('case-error')).toBeInTheDocument());
     expect(screen.getByTestId('case-retry')).toBeInTheDocument();
+  });
+
+  it('uploads an evidence file and re-checks the document list', async () => {
+    useCaseHandlers();
+    const uploadedDoc = {
+      id: 'DOC-1',
+      claim_id: 'CLM-1001',
+      file_name: 'accident-report.pdf',
+      content_type: 'application/pdf',
+      size_bytes: 324,
+      storage_key: 'claims/CLM-1001/doc-1',
+      uploaded_at: '2026-09-17T10:05:00+00:00',
+      uploaded_by: 'adjuster@claimos.test',
+      sha256: 'abc123',
+    };
+    // jsdom's XHR cannot transport FormData with a File, so the multipart POST
+    // is mocked at the axios seam; the real wire is covered by browser dogfood.
+    const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ data: uploadedDoc });
+    server.use(
+      http.get(`${API_BASE}/claims/CLM-1001/documents`, ({ request }) => {
+        const after = postSpy.mock.calls.length > 0;
+        return HttpResponse.json(after ? [uploadedDoc] : []);
+      })
+    );
+    renderCase();
+
+    // Empty book first — the upload then makes the item appear via the re-check.
+    await waitFor(() => expect(screen.getByTestId('documents-empty')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('document-input'), {
+      target: {
+        files: [new File(['fake-pdf-bytes'], 'accident-report.pdf', { type: 'application/pdf' })],
+      },
+    });
+    fireEvent.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() => expect(screen.getByTestId('document-item')).toBeInTheDocument());
+    expect(screen.getByText('accident-report.pdf')).toBeInTheDocument();
+    expect(screen.queryByTestId('documents-empty')).not.toBeInTheDocument();
+    expect(postSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces the allowlist rejection for a disallowed upload', async () => {
+    useCaseHandlers();
+    server.use(
+      http.get(`${API_BASE}/claims/CLM-1001/documents`, () => HttpResponse.json([]))
+    );
+    vi.spyOn(api, 'post').mockRejectedValue({
+      response: { status: 415, data: { detail: 'Unsupported content type: text/plain' } },
+    });
+    renderCase();
+
+    await waitFor(() => expect(screen.getByTestId('documents-empty')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('document-input'), {
+      target: {
+        files: [new File(['nope'], 'notes.txt', { type: 'text/plain' })],
+      },
+    });
+    fireEvent.click(screen.getByTestId('upload-button'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('upload-error')).toHaveTextContent('Unsupported format')
+    );
+    // The rejected file is not listed.
+    expect(screen.queryByTestId('document-item')).not.toBeInTheDocument();
   });
 });

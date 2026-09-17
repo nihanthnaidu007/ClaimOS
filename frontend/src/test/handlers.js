@@ -112,6 +112,23 @@ export const handlers = [
     HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
   ),
   http.get(`${API_BASE}/analytics/ops`, () => HttpResponse.json(opsAnalytics)),
+  http.get(`${API_BASE}/claims/:claimId/documents`, () => HttpResponse.json([])),
+  http.post(`${API_BASE}/claims/:claimId/documents`, () =>
+    HttpResponse.json(
+      {
+        id: 'DOC-NEW-1',
+        claim_id: 'CLM-1001',
+        file_name: 'accident-report.pdf',
+        content_type: 'application/pdf',
+        size_bytes: 324,
+        storage_key: 'claims/CLM-1001/doc-1',
+        uploaded_at: '2026-09-17T10:05:00+00:00',
+        uploaded_by: 'ops-demo@claimos.dev',
+        sha256: 'abc123',
+      },
+      { status: 201 }
+    )
+  ),
 ];
 
 // One server instance shared by every suite; tests override behavior via

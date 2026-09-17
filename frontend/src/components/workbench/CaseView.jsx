@@ -28,7 +28,7 @@ import {
 } from '@/lib/workbench';
 import OverrideModal from './OverrideModal';
 
-const STAGE_ORDER = ['intake', 'policy', 'documents', 'eligibility', 'decision'];
+const STAGE_ORDER = ['intake', 'policy', 'documents', 'fraud', 'eligibility', 'decision'];
 
 function Stat({ label, value, mono = true }) {
   return (
@@ -105,6 +105,123 @@ function DecisionLetter({ claimId, hasLetter }) {
             {letter.body}
           </pre>
         </div>
+      )}
+    </section>
+  );
+}
+
+function DocumentUploads({ claimId }) {
+  const [documents, setDocuments] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [file, setFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
+
+  async function loadDocuments() {
+    setLoadError(null);
+    try {
+      const response = await api.get(`/claims/${encodeURIComponent(claimId)}/documents`);
+      setDocuments(response.data);
+    } catch {
+      setLoadError('Could not load the document list.');
+    }
+  }
+
+  useEffect(() => {
+    loadDocuments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimId]);
+
+  async function handleUpload(event) {
+    event.preventDefault();
+    if (!file || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      await api.post(`/claims/${encodeURIComponent(claimId)}/documents`, form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setFile(null);
+      // Re-check: the list refetch is the confirmation the upload persisted.
+      await loadDocuments();
+    } catch (err) {
+      const status = err?.response?.status;
+      setUploadError(
+        status === 413
+          ? 'File exceeds the 10 MB size cap.'
+          : status === 415
+            ? 'Unsupported format — attach a PDF, PNG, or JPEG.'
+            : status === 422
+              ? 'That file is empty.'
+              : 'Upload failed. Check your connection and try again.'
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <section className="mt-6" data-testid="document-uploads">
+      <h2 className="flex items-center gap-2 text-sm font-semibold text-[#e2e8f0] uppercase tracking-wider">
+        <FileText className="w-4 h-4 text-[#10b981]" aria-hidden /> Evidence files
+      </h2>
+      <form onSubmit={handleUpload} className="mt-3 flex items-center gap-3 flex-wrap">
+        <label
+          htmlFor="document-file"
+          className="inline-flex items-center gap-2 text-sm text-[#8b96ab] cursor-pointer hover:text-[#e2e8f0] border border-[#1a1f2e] rounded-md px-3 py-2 bg-[#0d1119]"
+        >
+          {file ? file.name : 'Choose a file (PDF, PNG, JPEG — 10 MB max)'}
+          <input
+            id="document-file"
+            type="file"
+            accept="application/pdf,image/png,image/jpeg"
+            data-testid="document-input"
+            className="hidden"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+        </label>
+        <button
+          type="submit"
+          disabled={!file || uploading}
+          data-testid="upload-button"
+          className="inline-flex items-center gap-2 bg-[#3b82f6] hover:bg-[#2563eb] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-md px-4 py-2 transition-colors"
+        >
+          {uploading ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden /> : <CheckCircle2 className="w-4 h-4" aria-hidden />}
+          {uploading ? 'Uploading…' : 'Upload'}
+        </button>
+      </form>
+      {uploadError && (
+        <p className="mt-2 text-sm text-[#ef4444]" role="alert" data-testid="upload-error">
+          {uploadError}
+        </p>
+      )}
+      {loadError && (
+        <p className="mt-2 text-sm text-[#ef4444]" role="alert">
+          {loadError}
+        </p>
+      )}
+      {documents && documents.length === 0 && (
+        <p className="mt-3 text-sm text-[#8b96ab]" data-testid="documents-empty">
+          No evidence files attached yet.
+        </p>
+      )}
+      {documents && documents.length > 0 && (
+        <ul className="mt-3 space-y-2" data-testid="documents-list">
+          {documents.map((doc) => (
+            <li
+              key={doc.id}
+              data-testid="document-item"
+              className="bg-[#0d1119] border border-[#1a1f2e] rounded-lg p-3 flex items-center justify-between gap-3 flex-wrap"
+            >
+              <span className="text-sm text-[#e2e8f0]">{doc.file_name}</span>
+              <span className="text-xs font-mono text-[#8b96ab]">
+                {(doc.size_bytes / 1024).toFixed(1)} KB · {doc.content_type} · {formatDateTime(doc.uploaded_at)}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );
@@ -422,6 +539,8 @@ export default function CaseView() {
       </section>
 
       <DecisionLetter claimId={summary.claimId} hasLetter={summary.decision?.hasLetterBody} />
+
+      <DocumentUploads claimId={summary.claimId} />
 
       <AuditTrail entries={audit} />
 
