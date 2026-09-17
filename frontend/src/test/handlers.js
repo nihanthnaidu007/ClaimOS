@@ -146,6 +146,36 @@ export const handlers = [
       { status: 201 }
     )
   ),
+
+  // FNOL wizard: no server draft by default (404 = local copy is truth);
+  // PUT echoes the upsert the useWizardDraft autosave performs.
+  http.get(`${API_BASE}/fnol/drafts/:draftId`, () => new HttpResponse(null, { status: 404 })),
+  http.put(`${API_BASE}/fnol/drafts/:draftId`, async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json({ data: body.data, updatedAt: new Date().toISOString() });
+  }),
+
+  // Policy lookup: an ACTIVE PolicyRecord (snake_case, like the backend).
+  http.get(`${API_BASE}/policies/lookup`, ({ request }) => {
+    const url = new URL(request.url);
+    const num = url.searchParams.get('policy_number') || '';
+    if (num.toUpperCase() === 'POL-DEAD') {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json({
+      id: 'pol_fixture1',
+      policy_number: num || 'POL-2024-001847',
+      holder_name: 'Sarah Chen',
+      holder_email: 'sarah.chen@example.com',
+      holder_phone: '',
+      policy_type: 'auto',
+      status: 'active',
+      coverage_limit: 50000,
+      deductible: 500,
+      monthly_premium: 120,
+    });
+  }),
+>>>>>>> 8bc032a (test(fnol): wizard flows, draft model, and trace timeline coverage)
 ];
 
 // One server instance shared by every suite; tests override behavior via
