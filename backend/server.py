@@ -1,7 +1,17 @@
+import hashlib
 import json
+import uuid
 from datetime import datetime, timezone
 import structlog
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
@@ -31,13 +41,22 @@ from app.schemas import (
     ReadyResponse,
     RootStatusResponse,
     SubmitClaimResponse,
+    UploadedDocumentResponse,
 )
 from app.workbench_routes import router as workbench_router
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.notify_routes import router as notify_router
+from app.storage import get_provider, new_storage_key, sanitize_filename
 from agents import PIPELINE_STAGES
-from database import claims_col, db, policies_col, seed_database, seed_demo_users
+from database import (
+    claim_documents_col,
+    claims_col,
+    db,
+    policies_col,
+    seed_database,
+    seed_demo_users,
+)
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
 
@@ -259,6 +278,120 @@ async def search_policies(
         {"_id": 0}
     ).to_list(100)
     return results
+
+
+# ============ DOCUMENTS ============
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _upload_content_type_allowlist() -> set[str]:
+    return {
+        part.strip().lower()
+        for part in settings.upload_allowed_content_types.split(",")
+        if part.strip()
+    }
+
+
+@api_router.post(
+    "/claims/{claim_id}/documents",
+    response_model=UploadedDocumentResponse,
+    status_code=201,
+)
+@limiter.limit("30/minute")
+async def upload_claim_document(
+    claim_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    current_user: UserRecord = Depends(require_adjuster),
+):
+    """Attach one document to a claim (spec Tier 3).
+
+    Validation fails closed before storage: 413 over the size cap, 415 on a
+    non-allowlisted content type, 422 for an empty body. Filenames are
+    sanitized to safe basenames; blobs land under the storage provider with
+    a collision-proof per-claim key.
+    """
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    content_type = (file.content_type or "").split(";")[0].strip().lower()
+    if content_type not in _upload_content_type_allowlist():
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported content type: {content_type or 'unknown'}. "
+            f"Allowed: {settings.upload_allowed_content_types}",
+        )
+
+    max_bytes = settings.upload_max_bytes
+    chunks: list[bytes] = []
+    total = 0
+    while chunk := await file.read(1024 * 1024):
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds the {max_bytes} byte upload cap",
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    if total == 0:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty")
+
+    file_name = sanitize_filename(file.filename)
+    storage_key = new_storage_key(claim_id, file_name)
+    stored = await get_provider().save(
+        key=storage_key, content=content, content_type=content_type
+    )
+
+    doc = {
+        "id": f"doc_{uuid.uuid4().hex[:12]}",
+        "claim_id": claim_id,
+        "document_type": "upload",
+        "file_name": file_name,
+        "content_type": content_type,
+        "size_bytes": stored.size_bytes,
+        "storage_key": stored.storage_key,
+        "sha256": hashlib.sha256(content).hexdigest(),
+        "uploaded_at": _now(),
+        "uploaded_by": current_user.email,
+    }
+    await claim_documents_col.insert_one(doc.copy())
+    await emit_event(
+        claim_id,
+        {
+            "event": "document_uploaded",
+            "documentId": doc["id"],
+            "fileName": file_name,
+            "contentType": content_type,
+            "sizeBytes": stored.size_bytes,
+            "uploadedBy": current_user.email,
+        },
+    )
+    logger.info("document_uploaded claim_id=%s key=%s", claim_id, storage_key)
+    return UploadedDocumentResponse(**doc)
+
+
+@api_router.get(
+    "/claims/{claim_id}/documents",
+    response_model=list[UploadedDocumentResponse],
+)
+async def list_claim_documents(
+    claim_id: str, current_user: UserRecord = Depends(require_adjuster)
+):
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    docs = (
+        await claim_documents_col.find(
+            {"claim_id": claim_id, "document_type": "upload"}, {"_id": 0}
+        )
+        .sort("uploaded_at", -1)
+        .to_list(100)
+    )
+    return docs
 
 
 # ============ DASHBOARD ============

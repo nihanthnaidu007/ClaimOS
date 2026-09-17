@@ -173,6 +173,20 @@ class OpsAnalyticsResponse(BaseModel):
     sla: dict[str, Any]
 
 
+# ---- Document uploads (Tier 3) ----
+
+class UploadedDocumentResponse(BaseModel):
+    id: str
+    claim_id: str
+    file_name: str
+    content_type: str
+    size_bytes: int
+    storage_key: str
+    uploaded_at: str
+    uploaded_by: str
+    sha256: str
+
+
 
 # ---- Auth (auth backend PR) ----
 

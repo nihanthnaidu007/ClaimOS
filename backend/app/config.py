@@ -110,6 +110,12 @@ class Settings(BaseSettings):
     sla_low_hours: float = 48.0
     sla_elevated_hours: float = 24.0
 
+    # Document uploads (Tier 3). Files land under upload_dir (a mounted
+    # volume in deployments); allowlist is a comma-separated content-type list.
+    upload_dir: str = "/data/uploads"
+    upload_max_bytes: int = 10 * 1024 * 1024
+    upload_allowed_content_types: str = "application/pdf,image/png,image/jpeg"
+
     # Pipeline worker: seconds between queue polls when the queue is empty.
     worker_poll_interval_seconds: float = 1.0
 
