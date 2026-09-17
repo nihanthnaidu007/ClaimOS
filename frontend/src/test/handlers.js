@@ -86,6 +86,22 @@ export const workbenchCaseSummary = {
   failureReason: null,
   override: null,
   source: 'stored agent traces',
+export const opsAnalytics = {
+  cycleTime: { p50Seconds: 54000, p95Seconds: 129600, decided: 18 },
+  stp: { decided: 18, autoApproved: 11, escalated: 7, rate: 0.6111111111111112 },
+  fraud: { totalClaims: 27, flaggedClaims: 4, rate: 0.14814814814814814 },
+  decisions: [
+    { status: 'auto_approved', count: 11 },
+    { status: 'escalated', count: 7 },
+    { status: 'pending', count: 6 },
+    { status: 'rejected', count: 3 },
+  ],
+  sla: {
+    bySeverity: [
+      { severity: 'elevated', slaHours: 24, decided: 7, breaches: 2, breachRate: 0.2857142857142857 },
+      { severity: 'low', slaHours: 48, decided: 11, breaches: 0, breachRate: 0 },
+    ],
+  },
 };
 
 export const handlers = [
@@ -93,6 +109,7 @@ export const handlers = [
   http.get(`${API_BASE}/workbench/queue`, () =>
     HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
   ),
+  http.get(`${API_BASE}/analytics/ops`, () => HttpResponse.json(opsAnalytics)),
 ];
 
 // One server instance shared by every suite; tests override behavior via
