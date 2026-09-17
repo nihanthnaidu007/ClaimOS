@@ -1,18 +1,26 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-
 import structlog
-from fastapi import APIRouter, FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, StreamingResponse
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
 from agents import ClaimOrchestrator
+from app.auth_routes import router as auth_router
 from app.config import settings
 from app.counters import next_claim_number
+from app.deps import (
+    UserRecord,
+    require_adjuster,
+    require_authenticated,
+    verify_csrf,
+)
 from app.events import emit_event
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
+from app.rate_limit import limiter
 from app.schemas import (
     ClaimPdfResponse,
     ClaimRecord,
@@ -24,11 +32,19 @@ from app.schemas import (
     RootStatusResponse,
     SubmitClaimResponse,
 )
-from database import claims_col, db, policies_col, seed_database
+from database import claims_col, db, policies_col, seed_database, seed_demo_users
 from pdf_generator import generate_claim_pdf
 
-app = FastAPI()
+app = FastAPI(
+    # CSRF defense applies app-wide to unsafe methods (Origin/Referer check);
+    # cookie-authenticated routes add the session-bound token check in-route.
+    dependencies=[Depends(verify_csrf)]
+)
 api_router = APIRouter(prefix="/api")
+
+# Rate limiting: slowapi needs the limiter on app.state; the login/FNOL
+# decorators enforce per-route limits.
+app.state.limiter = limiter
 
 # Store active SSE queues
 sse_queues = {}
@@ -49,7 +65,9 @@ async def generate_claim_id():
 # ============ SSE ENDPOINT ============
 
 @api_router.get("/claims/stream/{claim_id}")
-async def stream_claim(claim_id: str, request: Request):
+async def stream_claim(
+    claim_id: str, request: Request, current_user: UserRecord = Depends(require_authenticated)
+):
     queue = asyncio.Queue()
     sse_queues[claim_id] = queue
 
@@ -74,7 +92,6 @@ async def stream_claim(claim_id: str, request: Request):
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*",
             "X-Accel-Buffering": "no"
         }
     )
@@ -83,7 +100,12 @@ async def stream_claim(claim_id: str, request: Request):
 # ============ CLAIMS ============
 
 @api_router.post("/claims", response_model=SubmitClaimResponse)
-async def submit_claim(submission: ClaimSubmission):
+@limiter.limit(settings.fnol_rate_limit)
+async def submit_claim(
+    request: Request,
+    submission: ClaimSubmission,
+    current_user: UserRecord = Depends(require_authenticated),
+):
     claim_id = await generate_claim_id()
 
     # Return claim ID immediately
@@ -118,13 +140,15 @@ async def submit_claim(submission: ClaimSubmission):
     return response
 
 @api_router.get("/claims", response_model=list[ClaimRecord])
-async def get_claims():
+async def get_claims(current_user: UserRecord = Depends(require_adjuster)):
     claims = await claims_col.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return claims
 
 
 @api_router.get("/claims/{claim_id}", response_model=ClaimRecord)
-async def get_claim(claim_id: str):
+async def get_claim(
+    claim_id: str, current_user: UserRecord = Depends(require_adjuster)
+):
     claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
@@ -132,7 +156,9 @@ async def get_claim(claim_id: str):
 
 
 @api_router.get("/claims/{claim_id}/pdf", response_model=ClaimPdfResponse)
-async def get_claim_pdf(claim_id: str):
+async def get_claim_pdf(
+    claim_id: str, current_user: UserRecord = Depends(require_adjuster)
+):
     claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
@@ -161,13 +187,15 @@ async def get_claim_pdf(claim_id: str):
 # ============ POLICIES ============
 
 @api_router.get("/policies", response_model=list[PolicyRecord])
-async def get_policies():
+async def get_policies(current_user: UserRecord = Depends(require_adjuster)):
     policies = await policies_col.find({}, {"_id": 0}).to_list(100)
     return policies
 
 
 @api_router.get("/policies/lookup", response_model=PolicyRecord)
-async def lookup_policy(policy_number: str = ""):
+async def lookup_policy(
+    policy_number: str = "", current_user: UserRecord = Depends(require_adjuster)
+):
     if not policy_number:
         raise HTTPException(status_code=400, detail="Policy number required")
     policy = await policies_col.find_one({"policy_number": policy_number}, {"_id": 0})
@@ -177,7 +205,9 @@ async def lookup_policy(policy_number: str = ""):
 
 
 @api_router.get("/policies/search", response_model=list[PolicyRecord])
-async def search_policies(q: str = ""):
+async def search_policies(
+    q: str = "", current_user: UserRecord = Depends(require_adjuster)
+):
     if not q:
         return await policies_col.find({}, {"_id": 0}).to_list(100)
 
@@ -195,7 +225,7 @@ async def search_policies(q: str = ""):
 # ============ DASHBOARD ============
 
 @api_router.get("/dashboard/stats", response_model=DashboardStatsResponse)
-async def get_dashboard_stats():
+async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuster)):
     total_claims = await claims_col.count_documents({})
     approved = await claims_col.count_documents({"status": "approved"})
     rejected = await claims_col.count_documents({"status": "rejected"})
@@ -272,7 +302,15 @@ async def ready():
 
 # ============ APP SETUP ============
 
+api_router.include_router(auth_router)  # /auth/* under the /api prefix
 app.include_router(api_router)
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """slowapi's default handler returns plain text; make 429s JSON like the rest of the API."""
+    return JSONResponse(status_code=429, content={"detail": "Rate limit exceeded"})
+
 
 # CORS: origins come from settings (CORS_ORIGINS as a list). Wildcard origins
 # cannot be combined with credentials per the CORS spec, so credentials are
@@ -292,6 +330,7 @@ app.add_middleware(RequestIdMiddleware)
 @app.on_event("startup")
 async def startup():
     await seed_database()
+    await seed_demo_users()
     logger.info("claimos_api_ready", environment=settings.environment, agents=5)
 
 
