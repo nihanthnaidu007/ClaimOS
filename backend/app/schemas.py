@@ -131,6 +131,48 @@ class ReadyResponse(BaseModel):
     database: str
 
 
+# ---- Ops analytics (Tier 3, AC-9) ----
+
+class CycleTimeStats(BaseModel):
+    p50Seconds: float
+    p95Seconds: float
+    decided: int
+
+
+class StpStats(BaseModel):
+    decided: int
+    autoApproved: int
+    escalated: int
+    rate: float
+
+
+class FraudFlagStats(BaseModel):
+    totalClaims: int
+    flaggedClaims: int
+    rate: float
+
+
+class DecisionCount(BaseModel):
+    status: str
+    count: int
+
+
+class SlaSeverityStats(BaseModel):
+    severity: str
+    slaHours: float
+    decided: int
+    breaches: int
+    breachRate: float
+
+
+class OpsAnalyticsResponse(BaseModel):
+    cycleTime: CycleTimeStats
+    stp: StpStats
+    fraud: FraudFlagStats
+    decisions: list[DecisionCount]
+    sla: dict[str, Any]
+
+
 
 # ---- Auth (auth backend PR) ----
 

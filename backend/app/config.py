@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     # submission; it adds risk points and routes to human review.
     intake_flag_amount_threshold: float = 500_000.0
 
+    # Ops analytics SLA targets (Tier 3). Hours allowed from submission to
+    # decision per derived severity; breaches surface in the ops dashboard.
+    sla_low_hours: float = 48.0
+    sla_elevated_hours: float = 24.0
+
     # Pipeline worker: seconds between queue polls when the queue is empty.
     worker_poll_interval_seconds: float = 1.0
 

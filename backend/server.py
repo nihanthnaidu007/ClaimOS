@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
+from app.analytics import collect_ops_analytics
 from app.auth_routes import router as auth_router
 from app.config import settings
 from app.counters import next_claim_number
@@ -25,6 +26,7 @@ from app.schemas import (
     ClaimSubmission,
     DashboardStatsResponse,
     HealthResponse,
+    OpsAnalyticsResponse,
     PolicyRecord,
     ReadyResponse,
     RootStatusResponse,
@@ -34,6 +36,7 @@ from app.workbench_routes import router as workbench_router
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.notify_routes import router as notify_router
+from agents import PIPELINE_STAGES
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
@@ -319,9 +322,15 @@ async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuste
 
 # ============ HEALTH ============
 
+@api_router.get("/analytics/ops", response_model=OpsAnalyticsResponse)
+async def get_ops_analytics(current_user: UserRecord = Depends(require_adjuster)):
+    """The five ops metric groups (spec Tier 3, AC-9): adjuster-only by role."""
+    return await collect_ops_analytics()
+
+
 @api_router.get("/", response_model=RootStatusResponse)
 async def root():
-    return {"status": "ok", "service": "ClaimOS API", "agents": 5}
+    return {"status": "ok", "service": "ClaimOS API", "agents": len(PIPELINE_STAGES)}
 
 
 @api_router.get("/health", response_model=HealthResponse)
