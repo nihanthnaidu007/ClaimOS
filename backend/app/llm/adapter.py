@@ -90,6 +90,18 @@ def load_model_config(env: dict[str, str] | None = None) -> dict[str, str]:
     }
 
 
+def _is_temperature_deprecation(exc: Exception) -> bool:
+    """True when the API rejected the call because temperature is deprecated.
+
+    Message-based on purpose: the 400 body ("`temperature` is deprecated for
+    this model") is stable across SDK versions, while the exception type is
+    not — and the degradation path is harmless even on a false positive (the
+    retry without the parameter either succeeds or surfaces the real error).
+    """
+    message = str(exc).lower()
+    return "temperature" in message and "deprecated" in message
+
+
 def _transient_kind(exc: Exception) -> str | None:
     """Classify an SDK error: None = non-retryable, else the transient category.
 
@@ -143,6 +155,9 @@ class LLMAdapter:
         )
         self._usage = usage_logger if usage_logger is not None else UsageLogger()
         self._backoff_base_s = backoff_base_s
+        # Models that reject the temperature parameter (deprecated on newer
+        # Claude models): per-agent temperatures degrade to the model default.
+        self._temperature_unsupported: set[str] = set()
 
     @property
     def client(self) -> anthropic.AsyncAnthropic:
@@ -189,6 +204,9 @@ class LLMAdapter:
         started = time.perf_counter()
         attempt = 0
         while True:
+            use_temperature = (
+                temperature is not None and model not in self._temperature_unsupported
+            )
             try:
                 call_kwargs: dict = {
                     "model": model,
@@ -197,7 +215,7 @@ class LLMAdapter:
                     "messages": messages,
                     "output_format": output_schema,
                 }
-                if temperature is not None:
+                if use_temperature:
                     # SDK 1.6.0's messages.parse() has no temperature kwarg;
                     # extra_body is its documented escape hatch for params
                     # missing from the helper's typed signature.
@@ -205,6 +223,17 @@ class LLMAdapter:
                 response = await self.client.messages.parse(**call_kwargs)
                 break
             except Exception as exc:
+                if use_temperature and _is_temperature_deprecation(exc):
+                    # Deterministic model-level 400, not a transient fault:
+                    # remember it and retry immediately without the parameter
+                    # instead of failing the claim.
+                    self._temperature_unsupported.add(model)
+                    logger.warning(
+                        "temperature_unsupported model=%s — per-agent temperatures "
+                        "dropped for this model; using the model default",
+                        model,
+                    )
+                    continue
                 kind = _transient_kind(exc)
                 if kind is None:
                     raise LLMError(f"LLM request failed: {exc}") from exc
