@@ -26,20 +26,20 @@ class Settings(BaseSettings):
     # /api/ready surfaces actual database connectivity at runtime.
     mongo_url: str = "mongodb://127.0.0.1:27017"
     db_name: str = "claimos"
+    # `environment` precedes cors_origins so the production validator on
+    # cors_origins can read it from info.data (pydantic validates fields in
+    # definition order and only exposes already-validated fields).
+    environment: Literal["development", "staging", "production"] = "development"
     # NoDecode hands the raw env string to the validator below so a plain
     # comma-separated CORS_ORIGINS works (pydantic-settings would otherwise
     # demand JSON for list fields).
     cors_origins: Annotated[list[str], NoDecode] = ["*"]
-    environment: Literal["development", "staging", "production"] = "development"
 
     # Placeholders for the LLM adapter PR (not yet consumed by the pipeline).
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-4-20250514"
     llm_request_timeout_seconds: float = 60.0
     anthropic_api_key: str = ""
-    # Legacy Emergent platform credential. The adapter PR retires this variable;
-    # it stays readable here so the current pipeline keeps working unchanged.
-    emergent_llm_key: str = ""
 
     # ---- Auth & security (auth backend PR) ----
     # HS256 signing secret for access tokens. MUST be set in any deployed
@@ -103,6 +103,15 @@ class Settings(BaseSettings):
         """Accept CORS_ORIGINS as a comma-separated string or a JSON list."""
         if isinstance(value, str):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
+        return value
+
+    @field_validator("cors_origins")
+    @classmethod
+    def _reject_wildcard_origins_in_production(cls, value: list[str], info) -> list[str]:
+        """Mirror of the jwt_secret guard: production must bind CORS to explicit
+        origins, so a wildcard (set explicitly or left as the default) fails boot."""
+        if info.data.get("environment") == "production" and "*" in value:
+            raise ValueError("CORS_ORIGINS must list explicit origins when ENVIRONMENT=production")
         return value
 
 

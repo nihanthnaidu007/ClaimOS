@@ -15,7 +15,7 @@ services:
       DB_NAME: claimos
       CORS_ORIGINS: http://localhost:3000
       UPLOAD_DIR: /data/uploads
-      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - uploads:/data/uploads
     ports:
