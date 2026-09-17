@@ -123,7 +123,7 @@ def generate_claim_pdf(state):
         pdf.cell(0, 8, 'RISK FACTORS', 0, 1)
         pdf.set_font('Helvetica', '', 9)
         for factor in risk_factors[:5]:
-            pdf.cell(0, 6, f'  - {factor[:80]}', 0, 1)
+            pdf.cell(0, 6, f'  - {_latin1_safe(factor[:80])}', 0, 1)
         pdf.ln(3)
     
     # Decision Letter
@@ -172,7 +172,8 @@ def generate_claim_pdf(state):
         pdf.cell(0, 8, 'NEXT STEPS', 0, 1)
         pdf.set_font('Helvetica', '', 9)
         for i, step in enumerate(next_steps, 1):
-            pdf.multi_cell(0, 5, f'{i}. {step}')
+            pdf.multi_cell(0, 5, f'{i}. {_latin1_safe(step)}',
+                           new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     
     # Output as base64
     buf = io.BytesIO()

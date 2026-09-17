@@ -25,12 +25,16 @@ def _state_with_citations():
             }
         },
         "policy": {"policyData": {"holder_name": "Sarah Chen"}, "deductibleApplied": 500.0},
-        "eligibility": {"riskScore": 5, "riskFactors": []},
+        "eligibility": {"riskScore": 5, "riskFactors": ["late-night incident — unverified"]},
         "decision": {
             "verdict": "approved",
             "payoutAmount": 2700.0,
             "summary": "Approved: active coverage, within limits.",
             "letterBody": "Dear Ms. Chen, we've approved your claim — payment follows shortly.",
+            "nextSteps": [
+                "We've issued payment to your account — expect it within 5 business days.",
+                "Keep your repair receipts in case of supplementary claims.",
+            ],
             "citations": [
                 {
                     "fact": "POLICY: status=active, adjustedPayout=2700.0",
