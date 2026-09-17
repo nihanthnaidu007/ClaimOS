@@ -1,0 +1,17 @@
+# Dependabot — weekly updates for npm (frontend), pip (backend), and actions.
+# Docker ecosystem: the compose file references no base-image tags of its own
+# (images are built from the two Dockerfiles), so no docker entry yet.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/frontend"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
