@@ -10,6 +10,7 @@ from starlette.middleware.cors import CORSMiddleware
 from agents import ClaimOrchestrator
 from app.config import settings
 from app.counters import next_claim_number
+from app.events import emit_event
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.schemas import (
@@ -106,7 +107,12 @@ async def submit_claim(submission: ClaimSubmission):
             await orchestrator.run(submission.model_dump())
         except Exception as exc:
             logger.exception("pipeline_failed", claim_id=claim_id, error=str(exc))
-            await queue.put({"event": "pipeline_error", "error": "Internal pipeline error. Please try again."})
+            failure_event = {"event": "pipeline_error", "error": "Internal pipeline error. Please try again."}
+            await queue.put(failure_event)
+            try:
+                await emit_event(claim_id, failure_event)
+            except Exception:
+                logger.exception("event_persist_failed", claim_id=claim_id)
 
     asyncio.create_task(run_pipeline())
     return response

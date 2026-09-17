@@ -477,20 +477,25 @@ class ClaimOrchestrator:
                     })
                     break
                     
-            except Exception as err:  # noqa: BLE001 — one bad agent must not kill the stream
+            except Exception:  # noqa: BLE001 — recorded below, then the pipeline halts
                 duration = int((time.time() - start_time) * 1000)
                 log_entry["status"] = "error"
                 log_entry["endTime"] = datetime.now(timezone.utc).isoformat()
                 log_entry["durationMs"] = duration
-                
-                logger.error(f"Agent {step['name']} error: {err}")
+
+                logger.exception("Agent %s failed for claim %s", step['name'], self.claim_id)
+                # Sanitized: raw exception text never reaches the client stream.
                 await self.stream({
                     "event": "agent_error",
                     "agent": step["name"],
                     "label": step["label"],
-                    "error": str(err),
+                    "error": "Internal pipeline error",
                     "duration": duration
                 })
+                # Downstream agents depend on this step's output: halt the run
+                # and persist the failure instead of continuing with broken state.
+                await self._fail_claim(f"Agent {step['name']} failed")
+                return self.state
         
         # Stream: pipeline complete
         await self.stream({
@@ -498,48 +503,56 @@ class ClaimOrchestrator:
             "finalState": self.state
         })
         
-        # Persist to MongoDB
+        # Persist to MongoDB; a persistence failure propagates to the server's
+        # pipeline handler, which logs it and emits a sanitized error event.
         await self._save_to_database()
         
         return self.state
-    
-    async def _save_to_database(self):
-        """Save claim to MongoDB."""
-        try:
-            claim_doc = {
-                "id": self.state['claimId'],
-                "policy_number": self.state['input'].get('policyNumber', ''),
-                "claim_date": datetime.now(timezone.utc).isoformat(),
-                "incident_date": self.state['intake'].get('normalizedData', {}).get('incidentDate', ''),
-                "incident_type": self.state['intake'].get('normalizedData', {}).get('incidentType', self.state['input'].get('incidentType', '')),
-                "claimed_amount": float(self.state['intake'].get('normalizedData', {}).get('claimedAmount', self.state['input'].get('claimedAmount', 0))),
-                "status": self.state.get('decision', {}).get('verdict', 'pending'),
-                "risk_score": self.state.get('eligibility', {}).get('riskScore', 0),
-                "decision_reason": self.state.get('decision', {}).get('reasoning', ''),
-                "agent_trace": {
-                    "intake": self.state.get('intake', {}),
-                    "policy": {k: v for k, v in self.state.get('policy', {}).items() if k != 'policyData'},
-                    "documents": self.state.get('documents', {}),
-                    "eligibility": self.state.get('eligibility', {}),
-                    "decision": self.state.get('decision', {}),
-                },
-                "agent_logs": self.state.get('agentLogs', []),
-                "holder_name": self.state.get('policy', {}).get('policyData', {}).get('holder_name', ''),
-                "is_historical": False,
-                "created_at": datetime.now(timezone.utc).isoformat()
-            }
-            
-            # Store document text if provided
-            doc_text = self.state['input'].get('documentText', '')
-            if doc_text:
-                await claims_col.database.claim_documents.insert_one({
-                    "claim_id": self.state['claimId'],
-                    "document_type": "evidence_text",
-                    "content_text": doc_text,
-                    "uploaded_at": datetime.now(timezone.utc).isoformat()
-                })
-            
-            await claims_col.insert_one(claim_doc)
-            logger.info(f"Claim {self.state['claimId']} saved to database")
-        except Exception as e:  # noqa: BLE001 — persistence failure is logged, not raised
-            logger.error(f"Error saving claim: {e}")
+
+    async def _fail_claim(self, reason: str):
+        """Mark the claim failed: emit the reason event and persist it."""
+        await self.stream({
+            "event": "claim_failed",
+            "reason": reason,
+        })
+        await self._save_to_database(failure_reason=reason)
+
+    async def _save_to_database(self, failure_reason: str | None = None):
+        """Save claim to MongoDB; raises on failure instead of swallowing."""
+        claim_doc = {
+            "id": self.state['claimId'],
+            "policy_number": self.state['input'].get('policyNumber', ''),
+            "claim_date": datetime.now(timezone.utc).isoformat(),
+            "incident_date": self.state['intake'].get('normalizedData', {}).get('incidentDate', ''),
+            "incident_type": self.state['intake'].get('normalizedData', {}).get('incidentType', self.state['input'].get('incidentType', '')),
+            "claimed_amount": float(self.state['intake'].get('normalizedData', {}).get('claimedAmount', self.state['input'].get('claimedAmount', 0))),
+            "status": "failed" if failure_reason else self.state.get('decision', {}).get('verdict', 'pending'),
+            "risk_score": self.state.get('eligibility', {}).get('riskScore', 0),
+            "decision_reason": self.state.get('decision', {}).get('reasoning', ''),
+            "agent_trace": {
+                "intake": self.state.get('intake', {}),
+                "policy": {k: v for k, v in self.state.get('policy', {}).items() if k != 'policyData'},
+                "documents": self.state.get('documents', {}),
+                "eligibility": self.state.get('eligibility', {}),
+                "decision": self.state.get('decision', {}),
+            },
+            "agent_logs": self.state.get('agentLogs', []),
+            "holder_name": self.state.get('policy', {}).get('policyData', {}).get('holder_name', ''),
+            "is_historical": False,
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        if failure_reason:
+            claim_doc["failure_reason"] = failure_reason
+
+        # Store document text if provided
+        doc_text = self.state['input'].get('documentText', '')
+        if doc_text:
+            await claims_col.database.claim_documents.insert_one({
+                "claim_id": self.state['claimId'],
+                "document_type": "evidence_text",
+                "content_text": doc_text,
+                "uploaded_at": datetime.now(timezone.utc).isoformat()
+            })
+
+        await claims_col.insert_one(claim_doc)
+        logger.info("Claim %s saved to database", self.state['claimId'])
