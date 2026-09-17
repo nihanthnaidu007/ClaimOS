@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 import database
 from app.deps import UserRecord, require_adjuster
+from app.evidence_pack import generate_evidence_pack
 from app.events import emit_event, get_claim_events
 
 router = APIRouter()
@@ -203,3 +204,23 @@ async def upload_claim_document(
         "uploadedAt": now,
         "documentType": "adjuster_upload",
     }
+
+
+# ============ EVIDENCE PACK ============
+
+class EvidencePackResponse(BaseModel):
+    claimId: str
+    filename: str
+    pdf: str
+
+
+@router.get("/claims/{claim_id}/evidence-pack", response_model=EvidencePackResponse)
+async def get_evidence_pack(claim_id: str, current_user: UserRecord = Depends(require_adjuster)):
+    """Full adjudication record as a downloadable PDF (traces + decision + events)."""
+    claim = await _require_claim(claim_id)
+    events = await get_claim_events(claim_id)
+    runs = await database.claim_runs_col.find(
+        {"claim_id": claim_id}, {"_id": 0}
+    ).sort("attempt", 1).to_list(50)
+    pdf_base64 = generate_evidence_pack(claim, events, runs)
+    return {"claimId": claim_id, "filename": f"evidence-pack-{claim_id}.pdf", "pdf": pdf_base64}
