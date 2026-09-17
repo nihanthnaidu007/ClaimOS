@@ -283,10 +283,21 @@ export default function WorkbenchQueue() {
                     {formatCurrency(row.claimed_amount)}
                   </td>
                   <td className="px-4 py-3">
-                    <span
-                      className={`inline-block border rounded px-1.5 py-0.5 text-[11px] font-mono uppercase ${statusClassName(row.status)}`}
-                    >
-                      {(row.status || '—').replace('_', ' ')}
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`inline-block border rounded px-1.5 py-0.5 text-[11px] font-mono uppercase ${statusClassName(row.status)}`}
+                      >
+                        {(row.status || '—').replace('_', ' ')}
+                      </span>
+                      {(row.fraud_flags || []).length > 0 && (
+                        <span
+                          data-testid={`queue-fraud-flag-${row.id}`}
+                          title={(row.fraud_flags || []).map(f => f.detail || f.code).join('; ')}
+                          className={`inline-block border rounded px-1.5 py-0.5 text-[11px] font-mono font-bold uppercase ${(row.fraud_flags || []).some(f => f.severity === 'high') ? 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#ef4444]' : 'border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[#f59e0b]'}`}
+                        >
+                          Flagged
+                        </span>
+                      )}
                     </span>
                   </td>
                   <td className="px-4 py-3">

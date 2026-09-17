@@ -310,6 +310,8 @@ class WorkbenchQueueRow(BaseModel):
     sla: WorkbenchSLA
     escalation_reason: str | None = None
     failure_reason: str | None = None
+    # Queue badge: non-empty when the fraud cross-check flagged the claim.
+    fraud_flags: list[FraudFlagOut] = []
 
 
 class WorkbenchQueueResponse(BaseModel):
@@ -338,6 +340,8 @@ class CaseSummaryResponse(BaseModel):
     status: str
     severity: SEVERITY_VALUES
     riskScore: float = 0.0
+    # Case badge: non-empty when the fraud cross-check flagged the claim.
+    fraudFlags: list[FraudFlagOut] = []
     recommendation: str | None = None
     confidence: float | None = None
     eligibility: dict[str, Any] = {}

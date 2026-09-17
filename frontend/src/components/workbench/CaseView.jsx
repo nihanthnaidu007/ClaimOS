@@ -259,6 +259,15 @@ export default function CaseView() {
             >
               {severityPresentation(summary.severity).label}
             </span>
+            {(summary.fraudFlags || []).length > 0 && (
+              <span
+                data-testid="case-fraud-badge"
+                title={(summary.fraudFlags || []).map(f => f.detail || f.code).join('; ')}
+                className={`inline-block border rounded px-1.5 py-0.5 text-[11px] font-mono font-bold uppercase ${(summary.fraudFlags || []).some(f => f.severity === 'high') ? 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#ef4444]' : 'border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[#f59e0b]'}`}
+              >
+                ⚑ Fraud flagged
+              </span>
+            )}
             {summary.sla && (
               <span
                 data-testid="case-sla-badge"

@@ -26,9 +26,6 @@ export const dashboardStats = {
       incident_type: 'collision',
       claimed_amount: 4200,
       status: 'approved',
-      fraud_flags: [
-        { code: 'duplicate_incident', severity: 'high', detail: 'Matches prior claim CLM-0009', evidence: { duplicate_of_claim_id: 'CLM-0009' } },
-      ],
     },
   ],
 };
@@ -89,6 +86,8 @@ export const workbenchCaseSummary = {
   failureReason: null,
   override: null,
   source: 'stored agent traces',
+};
+
 export const opsAnalytics = {
   cycleTime: { p50Seconds: 54000, p95Seconds: 129600, decided: 18 },
   stp: { decided: 18, autoApproved: 11, escalated: 7, rate: 0.6111111111111112 },

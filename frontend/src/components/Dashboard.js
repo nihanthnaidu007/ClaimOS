@@ -154,18 +154,8 @@ export default function Dashboard({ onRecentClaims }) {
                 <span className="text-sm text-[#8892a4] flex-1 truncate">{claim.holder_name || claim.policy_number}</span>
                 <span className="text-xs text-[#8892a4] font-mono">{claim.incident_type}</span>
                 <span className="text-sm font-mono text-[#e2e8f0]">{formatDollars(claim.claimed_amount)}</span>
-                <span className="inline-flex items-center gap-1.5">
-                  <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${verdictPill(claim.status)}`}>
-                    {(claim.status || 'pending').toUpperCase()}
-                  </span>
-                  {(claim.fraud_flags || []).length > 0 && (
-                    <span
-                      data-testid={`fraud-flag-${claim.id}`}
-                      className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold border rounded-none ${(claim.fraud_flags || []).some(f => f.severity === 'high') ? 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30' : 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30'}`}
-                    >
-                      FLAGGED
-                    </span>
-                  )}
+                <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${verdictPill(claim.status)}`}>
+                  {(claim.status || 'pending').toUpperCase()}
                 </span>
               </div>
             ))

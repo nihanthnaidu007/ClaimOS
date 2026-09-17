@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight, ShieldCheck, BarChart3 } from 'lucide-react';
+import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import NotificationBell from '@/components/NotificationBell';
 
@@ -9,7 +9,6 @@ const NAV_ITEMS = [
   { path: '/new-claim', label: 'New Claim', icon: FilePlus },
   { path: '/policies', label: 'Policy Lookup', icon: Search },
   { path: '/history', label: 'Claim History', icon: History },
-  { path: '/ops', label: 'Ops Analytics', icon: BarChart3 },
 ];
 
 const AGENT_STATUS = [
