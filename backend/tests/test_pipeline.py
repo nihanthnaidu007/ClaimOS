@@ -14,15 +14,15 @@ import pytest
 
 import agents
 import database
-from agents import (
-    DecisionOutput,
-    DocumentOutput,
-    EligibilityOutput,
+from agents import LLMAdapter
+from app.llm.schemas import (
+    DecisionResult,
+    DocumentAnalysis,
+    EligibilityResult,
     ExtractedFacts,
-    IntakeOutput,
-    LLMAdapter,
-    NormalizedData,
-    PolicyOutput,
+    IntakeResult,
+    NormalizedClaim,
+    PolicyVerification,
 )
 from app.events import emit_event, get_claim_events
 from app.usage import UsageLogger
@@ -74,67 +74,76 @@ ALL_STAGES = {
 
 
 def _intake(valid=True):
-    return IntakeOutput(
+    return IntakeResult(
         valid=valid,
-        normalizedData=NormalizedData(
+        normalizedData=NormalizedClaim(
             policyNumber=POLICY_NUMBER,
             incidentDate="2026-09-01",
             incidentType="theft",
             claimedAmount=1200.0,
             description="Parked car broken into; stereo and tools stolen overnight.",
         ),
-        reasoning="ok",
+        summary="ok",
     )
 
 
 def _halted_intake():
-    """Model-approved output whose incident date is objectively in the future —
-    only the deterministic verdict can (and must) halt the run on it."""
-    return IntakeOutput(
+    """Model-approved output whose description is empty — only the
+    deterministic verdict can (and must) halt the run on it."""
+    return IntakeResult(
         valid=True,
-        normalizedData=NormalizedData(
+        normalizedData=NormalizedClaim(
             policyNumber=POLICY_NUMBER,
-            incidentDate="2999-01-01",
+            incidentDate="2026-09-01",
             incidentType="theft",
             claimedAmount=1200.0,
-            description="Parked car broken into; stereo and tools stolen overnight.",
+            description="",
         ),
-        reasoning="ok",
+        summary="ok",
     )
 
 
 CLEAN_OUTPUTS = {
-    IntakeOutput: _intake(),
-    PolicyOutput: PolicyOutput(
-        found=True,
-        statusCheck="ACTIVE",
-        coverageCheck="COVERED",
-        withinLimits=True,
-        adjustedPayout=700.0,
-        deductibleApplied=500.0,
-        reasoning="clean",
+    IntakeResult: _intake(),
+    PolicyVerification: PolicyVerification(
+        status="active",
+        statusDetail="Policy active on the incident date.",
+        coverage="covered",
+        coverageDetail="theft is in covered_events.",
+        appearsOverLimit=False,
+        claimFrequencyFlag=False,
+        priorClaims12mo=0,
+        citedFields=["end_date=2027-01-01", "coverage_limit=50000.0", "deductible=500.0"],
+        summary="clean",
     ),
-    DocumentOutput: DocumentOutput(
+    DocumentAnalysis: DocumentAnalysis(
         extracted=ExtractedFacts(),
-        consistencyScore=95,
+        consistency="consistent",
         redFlags=[],
-        supportingEvidence=["police report #22-1187"],
-        reasoning="consistent",
+        supportingEvidence=[{"excerpt": "police report #22-1187", "note": "corroborates"}],
+        summary="consistent",
     ),
-    EligibilityOutput: EligibilityOutput(
+    EligibilityResult: EligibilityResult(
         eligible=True,
-        riskScore=12,
         riskFactors=[],
         fraudIndicators=[],
         recommendation="auto_approve",
-        reasoning="low risk",
+        inputGaps=[],
+        summary="low risk",
     ),
-    DecisionOutput: DecisionOutput(
-        verdict="auto_approve",
+    DecisionResult: DecisionResult(
+        verdict="approved",
         payoutAmount=700.0,
         letterSubject="Your claim decision",
         letterBody="Approved.",
-        reasoning="confident",
+        citations=[
+            {
+                "fact": "Policy active on the incident date with theft coverage",
+                "sourceRef": "policy.citedFields[0]: end_date=2027-01-01",
+                "customerFriendlyExplanation": "Your policy was active and covers this incident.",
+            }
+        ],
+        summary="confident",
         confidence=0.93,
     ),
 }
@@ -202,7 +211,14 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     claim = await database.claims_col.find_one({"id": "CLM-FULL-1"})
     assert claim is not None
     assert claim["status"] == "auto_approved"
-    assert claim["agent_trace"]["decision"]["verdict"] == "auto_approve"
+    assert claim["agent_trace"]["decision"]["verdict"] == "approved"
+    # All five validated outputs stored, Decision citations intact (brief: the
+    # dry-run pipeline emits five validated outputs with citations present).
+    assert set(claim["agent_trace"].keys()) == {
+        "intake", "policy", "documents", "eligibility", "decision"
+    }
+    assert claim["agent_trace"]["decision"]["citations"][0]["sourceRef"]
+    assert claim["agent_trace"]["documents"]["consistencyScore"] == 90
     # Upsert, not insert: exactly one claim row despite checkpoint re-saves.
     assert await database.claims_col.count_documents({"id": "CLM-FULL-1"}) == 1
 
@@ -226,12 +242,12 @@ async def test_stp_escalates_low_confidence_with_reason(monkeypatch, patched_mon
     """A failing gate leg escalates and names the reason."""
     await _seed_policy()
     outputs = dict(CLEAN_OUTPUTS)
-    outputs[DecisionOutput] = DecisionOutput(
-        verdict="auto_approve",
+    outputs[DecisionResult] = DecisionResult(
+        verdict="approved",
         payoutAmount=700.0,
         letterSubject="Your claim decision",
         letterBody="Under review.",
-        reasoning="not sure",
+        summary="not sure",
         confidence=0.40,
     )
     _install_adapter(monkeypatch, outputs)
@@ -285,7 +301,7 @@ async def test_rerun_resumes_from_checkpoints(monkeypatch, patched_mongo):
     assert status2 == RUN_AUTO_APPROVED
     # Only ELIGIBILITY and DECISION ran again; nothing was re-executed.
     assert len(messages.parse_calls) == 5
-    assert messages.parse_calls[-2:] == ["EligibilityOutput", "DecisionOutput"]
+    assert messages.parse_calls[-2:] == ["EligibilityResult", "DecisionResult"]
 
     claim = await database.claims_col.find_one({"id": "CLM-RES-1"})
     assert claim["status"] == "auto_approved"
@@ -298,7 +314,7 @@ async def test_resubmission_after_terminal_run_seeds_next_attempt(
 ):
     """A terminal run's checkpoints seed attempt N+1's stage map."""
     outputs = dict(CLEAN_OUTPUTS)
-    outputs[IntakeOutput] = _halted_intake()  # halts: terminal fast
+    outputs[IntakeResult] = _halted_intake()  # halts: terminal fast
     _install_adapter(monkeypatch, outputs)
     await _seed_policy()
     await enqueue_claim_run("CLM-ATT-1", dict(SUBMISSION))
@@ -312,11 +328,11 @@ async def test_resubmission_after_terminal_run_seeds_next_attempt(
 
 
 async def test_invalid_intake_halts_as_pending(monkeypatch, patched_mongo):
-    """An objectively invalid intake (future incident date, code-decided) halts
-    the run even when the LLM approved it."""
+    """An objectively invalid intake (empty required description, code-decided)
+    halts the run even when the LLM approved it."""
     await _seed_policy()
     outputs = dict(CLEAN_OUTPUTS)
-    outputs[IntakeOutput] = _halted_intake()
+    outputs[IntakeResult] = _halted_intake()
     _install_adapter(monkeypatch, outputs)
     await enqueue_claim_run("CLM-HALT-1", dict(SUBMISSION))
     claimed = await claim_next_run("worker-a")
