@@ -118,6 +118,12 @@ def _transient_kind(exc: Exception) -> str | None:
         return "server"
     if isinstance(exc, anthropic.APIConnectionError):
         return "connection"
+    if isinstance(exc, (ValidationError, LLMSchemaValidationError)):
+        # The SDK validates the model's structured payload locally and the
+        # adapter re-validates the parsed value; malformed, truncated, or
+        # wrongly-shaped LLM JSON is a transient output-quality failure, not
+        # a transport error — retrying usually produces a parseable response.
+        return "schema"
     return None
 
 
@@ -127,6 +133,10 @@ def _terminal_error(kind: str, exc: Exception) -> LLMError:
         return LLMTimeout(f"LLM request timed out past retry cap: {exc}")
     if kind == "rate_limit":
         return LLMRateLimited(f"LLM rate limited past retry cap: {exc}")
+    if kind == "schema":
+        return LLMSchemaValidationError(
+            f"LLM output failed schema validation past retry cap: {exc}"
+        )
     return LLMError(f"LLM transient failure past retry cap ({kind}): {exc}")
 
 
@@ -205,6 +215,7 @@ class LLMAdapter:
         started = time.perf_counter()
         attempt = 0
         while True:
+            response = None
             use_temperature = (
                 temperature is not None and model not in self._temperature_unsupported
             )
@@ -222,8 +233,20 @@ class LLMAdapter:
                     # missing from the helper's typed signature.
                     call_kwargs["extra_body"] = {"temperature": temperature}
                 response = await self.client.messages.parse(**call_kwargs)
+                # Coerce INSIDE the retry loop: SDK parse-shape drift and our
+                # own model_validate both surface as LLMSchemaValidationError,
+                # which _transient_kind treats as retryable — a single
+                # malformed or wrong-shape response retries under the bounded
+                # backoff instead of failing the agent.
+                result = self._coerce_response(response, output_schema, agent)
+                await self._log_attempt(response, started, agent, model, claim_id)
                 break
+            except LLMRefusal:
+                # Refusal-safe: surfaced as its own typed error, never retried.
+                await self._log_attempt(response, started, agent, model, claim_id)
+                raise
             except Exception as exc:
+                await self._log_attempt(response, started, agent, model, claim_id)
                 if use_temperature and _is_temperature_deprecation(exc):
                     # Deterministic model-level 400, not a transient fault:
                     # remember it and retry immediately without the parameter
@@ -247,18 +270,17 @@ class LLMAdapter:
                 )
                 attempt += 1
                 await asyncio.sleep(delay)
-
-        latency_ms = int((time.perf_counter() - started) * 1000)
-        usage = getattr(response, "usage", None)
-        try:
-            result = self._coerce_response(response, output_schema, agent)
-        finally:
-            await self._log_usage(
-                agent=agent, model=model, usage=usage,
-                latency_ms=latency_ms, claim_id=claim_id,
-                call_type="complete_structured",
-            )
         return result
+
+    async def _log_attempt(self, response, started: float, agent: str | None,
+                           model: str, claim_id: str | None) -> None:
+        """Per-attempt usage bookkeeping (usage is None when no response arrived)."""
+        await self._log_usage(
+            agent=agent, model=model,
+            usage=getattr(response, "usage", None) if response is not None else None,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+            claim_id=claim_id, call_type="complete_structured",
+        )
 
     def _coerce_response(self, response, output_schema: type[T], agent: str | None) -> T:
         """Refusal check + one-point schema validation of the parsed output."""

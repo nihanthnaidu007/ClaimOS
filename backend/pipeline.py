@@ -175,16 +175,18 @@ class PipelineRunner:
                 state[stage["stateKey"]] = cp.get("output") or {}
                 # Rebuild the trace entry so a resumed run's claim document
                 # still shows the full stage history, not just the new work.
-                state["agentLogs"].append(
-                    {
-                        "agent": stage["name"],
-                        "status": "done",
-                        "startTime": cp.get("started_at"),
-                        "endTime": cp.get("finished_at"),
-                        "toolsCalled": cp.get("tools_called") or [],
-                        "durationMs": cp.get("duration_ms", 0),
-                    }
-                )
+                rebuilt = {
+                    "agent": stage["name"],
+                    "status": "done",
+                    "startTime": cp.get("started_at"),
+                    "endTime": cp.get("finished_at"),
+                    "toolsCalled": cp.get("tools_called") or [],
+                    "durationMs": cp.get("duration_ms", 0),
+                }
+                cp_output = cp.get("output") or {}
+                if isinstance(cp_output, dict) and cp_output.get("confidence") is not None:
+                    rebuilt["confidence"] = cp_output["confidence"]
+                state["agentLogs"].append(rebuilt)
         return state
 
     async def run(self) -> str:
@@ -343,6 +345,10 @@ class PipelineRunner:
         log_entry["endTime"] = _now()
         log_entry["durationMs"] = duration
         output = self.state[stage["stateKey"]]
+        # Agent outputs MAY expose a confidence score (the decision agent does);
+        # surface it on the trace entry so the timeline renders what exists.
+        if isinstance(output, dict) and output.get("confidence") is not None:
+            log_entry["confidence"] = output["confidence"]
         tools = next(
             (
                 log.get("toolsCalled") or []
