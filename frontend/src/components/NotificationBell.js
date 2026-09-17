@@ -147,7 +147,7 @@ export default function NotificationBell() {
             </form>
           )}
 
-          {signedIn && error && (
+          {error && (
             <div data-testid="notification-error" className="px-4 py-3 text-[12px] text-[#fbbf24] border-b border-[#1a1f2e]">
               {error}
             </div>
