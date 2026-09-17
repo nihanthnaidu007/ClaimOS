@@ -42,6 +42,7 @@ def test_core_api_surface_is_mounted():
     expected = {
         "/api/claims",
         "/api/claims/stream/{claim_id}",
+        "/api/events/streams/{claim_id}",
         "/api/policies",
         "/api/policies/lookup",
         "/api/dashboard/stats",
