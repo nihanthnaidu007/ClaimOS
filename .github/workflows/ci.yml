@@ -187,6 +187,11 @@ jobs:
         # finding fails this job and blocks merge.
         run: |
           python -m venv /tmp/audit-venv
+          # Upgrade the venv-seeded pip first: `python -m venv` seeds the
+          # runner image's pip, which ages on the image and accumulates its
+          # own advisories — without this the audit fails on the installer
+          # (12 findings on seeded pip 25.0.1) instead of on dependencies.
+          /tmp/audit-venv/bin/pip install --upgrade pip
           /tmp/audit-venv/bin/pip install pip-audit -r backend/requirements.txt
           /tmp/audit-venv/bin/pip-audit
       - name: npm audit (frontend, production deps only)
