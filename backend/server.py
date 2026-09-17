@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.analytics import collect_ops_analytics
 from app.auth_routes import router as auth_router
+from app.claims_routes import router as claims_router
 from app.config import settings
 from app.counters import next_claim_number
 from app.deps import (
@@ -27,6 +28,7 @@ from app.deps import (
     verify_csrf,
 )
 from app.events import emit_event, tail_claim_events
+from app.fnol_drafts import router as fnol_drafts_router
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
@@ -571,6 +573,8 @@ api_router.include_router(auth_router)  # /auth/* under the /api prefix
 api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
 api_router.include_router(status_router)  # /status/* public portal endpoints
 api_router.include_router(notify_router)  # /notifications/* authenticated
+api_router.include_router(claims_router)  # trace, documents, evidence pack
+api_router.include_router(fnol_drafts_router)  # resumable FNOL drafts
 app.include_router(api_router)
 
 
