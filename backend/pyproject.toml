@@ -1,15 +1,20 @@
+# ClaimOS backend project configuration.
+#
+# Lint: pip install ruff && ruff check .
+
 [tool.ruff]
 line-length = 120
 target-version = "py312"
 
 [tool.ruff.lint]
-# Substrate baseline: pycodestyle errors (E4/E7/E9) + pyflakes (F).
-# No code changes were allowed in this task, so rules that flag existing
-# scaffold code (style E5, naming, etc.) are intentionally not selected.
+# Keep the bar at correctness and obvious hygiene (ruff's default rule set):
+# E4/E7/E9 pycodestyle subset, F pyflakes (unused imports/variables, undefined
+# names, f-string issues). Style rules (E5, naming, etc.) are intentionally not
+# selected. PR #3 (CI substrate) shipped the same set; this file merges the two.
 select = ["E4", "E7", "E9", "F"]
 
 [tool.ruff.lint.per-file-ignores]
-# server.py: load_dotenv must run before the database/agents imports (E402 is
-# the deliberate env-then-import pattern); `db` is re-exported for callers (F401).
-# The backend-hardening task cleans this up and can drop the ignore.
-"server.py" = ["E402", "F401"]
+# server.py loads backend/.env BEFORE importing local modules that read env vars
+# at import time (database.py raises without MONGO_URL) — the late imports are
+# deliberate load order, not an oversight.
+"server.py" = ["E402"]

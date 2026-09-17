@@ -15,7 +15,7 @@ from typing import Optional
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
-from database import db, policies_col, claims_col, seed_database
+from database import policies_col, claims_col, seed_database
 from agents import ClaimOrchestrator
 from pdf_generator import generate_claim_pdf
 
