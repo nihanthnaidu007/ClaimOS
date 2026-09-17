@@ -34,6 +34,7 @@ pymongo==4.18.1
 pytest-asyncio==1.4.0
 pytest==9.1.1
 python-dotenv==1.2.3
+python-multipart==0.0.22
 pytz==2026.3.post1
 ruff==0.16.8
 sentinels==1.1.1
