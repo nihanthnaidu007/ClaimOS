@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
+import NotificationBell from '@/components/NotificationBell';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -118,8 +119,11 @@ export default function Sidebar({ recentClaims = [] }) {
 
       {/* Footer */}
       <div className="px-4 py-3 border-t border-[#1a1f2e]">
-        <div className="text-[10px] text-[#4a5568] font-mono">
-          ClaimOS v2.0 · 5 Agents Active
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] text-[#4a5568] font-mono">
+            ClaimOS v2.0 · 5 Agents Active
+          </span>
+          <NotificationBell />
         </div>
       </div>
     </div>
