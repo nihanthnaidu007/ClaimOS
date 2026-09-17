@@ -176,23 +176,30 @@ class LLMAdapter:
         agent: str | None = None,
         claim_id: str | None = None,
         max_tokens: int = DEFAULT_MAX_TOKENS,
+        temperature: float | None = None,
     ) -> T:
         """Schema-guaranteed result.
 
-        Raises LLMRefusal / LLMTimeout / LLMRateLimited / LLMSchemaValidationError /
-        LLMError; retries transient failures with backoff + jitter up to the cap.
+        `system` is a string or a list of text content blocks (the prompt-caching
+        preamble passes cache_control-marked blocks); `temperature` is omitted
+        from the call when None. Raises LLMRefusal / LLMTimeout / LLMRateLimited /
+        LLMSchemaValidationError / LLMError; retries transient failures with
+        backoff + jitter up to the cap.
         """
         started = time.perf_counter()
         attempt = 0
         while True:
             try:
-                response = await self.client.messages.parse(
-                    model=model,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=messages,
-                    output_format=output_schema,
-                )
+                call_kwargs: dict = {
+                    "model": model,
+                    "max_tokens": max_tokens,
+                    "system": system,
+                    "messages": messages,
+                    "output_format": output_schema,
+                }
+                if temperature is not None:
+                    call_kwargs["temperature"] = temperature
+                response = await self.client.messages.parse(**call_kwargs)
                 break
             except Exception as exc:
                 kind = _transient_kind(exc)

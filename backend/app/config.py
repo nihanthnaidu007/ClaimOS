@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     stp_low_severity_amount: float = 10_000.0
     stp_low_severity_types: str = "theft,weather_damage,vandalism"
 
+    # Intake flag threshold (high_amount flag). The flag never invalidates a
+    # submission; it adds risk points and routes to human review.
+    intake_flag_amount_threshold: float = 500_000.0
+
     # Pipeline worker: seconds between queue polls when the queue is empty.
     worker_poll_interval_seconds: float = 1.0
 

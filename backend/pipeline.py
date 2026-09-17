@@ -449,7 +449,7 @@ class PipelineRunner:
             ),
             "status": status,
             "risk_score": self.state.get("eligibility", {}).get("riskScore", 0),
-            "decision_reason": self.state.get("decision", {}).get("reasoning", ""),
+            "decision_reason": self.state.get("decision", {}).get("summary", ""),
             "agent_trace": {
                 "intake": self.state.get("intake", {}),
                 "policy": {k: v for k, v in self.state.get("policy", {}).items() if k != "policyData"},
