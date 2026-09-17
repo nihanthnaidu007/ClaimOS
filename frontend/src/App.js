@@ -1,10 +1,15 @@
-import { useState, useCallback } from "react";
+// App shell: authenticated layout + routes.
+//
+// Every page consumes server state through TanStack Query (lib/queries.js);
+// this component only wires the router, the auth gate, and the sidebar.
+// Claim detail lives at /claims/:id — the full trace timeline, documents,
+// and evidence pack for one claim.
+import { useState, useCallback } from 'react';
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Outlet, Link, useNavigate } from "react-router-dom";
 import { LogOut, Hexagon, BarChart3 } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import Dashboard from "@/components/Dashboard";
-import NewClaim from "@/components/NewClaim";
 import PolicyLookup from "@/components/PolicyLookup";
 import ClaimHistory from "@/components/ClaimHistory";
 import { AuthProvider, RequireRole, useAuth } from "@/lib/auth";
@@ -12,6 +17,8 @@ import WorkbenchQueue from "@/components/workbench/WorkbenchQueue";
 import CaseView from "@/components/workbench/CaseView";
 import StatusPortal from "@/components/StatusPortal";
 import OpsAnalytics from "@/components/workbench/OpsAnalytics";
+import NewClaimPage from "@/features/claims/NewClaimPage";
+import ClaimDetail from "@/features/claims/ClaimDetail";
 
 function WorkbenchShell() {
   const { user, logout } = useAuth();
@@ -67,7 +74,8 @@ function ClaimantConsole() {
       <main className="main-panel">
         <Routes>
           <Route path="/" element={<Dashboard onRecentClaims={handleRecentClaims} />} />
-          <Route path="/new-claim" element={<NewClaim />} />
+          <Route path="/new-claim" element={<NewClaimPage />} />
+          <Route path="/claims/:id" element={<ClaimDetail />} />
           <Route path="/policies" element={<PolicyLookup />} />
           <Route path="/history" element={<ClaimHistory />} />
         </Routes>
@@ -97,8 +105,15 @@ function App() {
             {/* Ops analytics: adjuster-only metric groups (spec AC-9). */}
             <Route path="ops" element={<OpsAnalytics />} />
           </Route>
-          {/* Claimant console: unchanged behavior. */}
-          <Route path="*" element={<ClaimantConsole />} />
+          {/* Claimant console: any authenticated user. */}
+          <Route
+            path="*"
+            element={
+              <RequireRole>
+                <ClaimantConsole />
+              </RequireRole>
+            }
+          />
         </Routes>
       </AuthProvider>
     </BrowserRouter>

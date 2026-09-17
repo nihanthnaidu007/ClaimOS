@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+// Policy lookup: typeahead search over policies with per-policy claim counts.
+// Search runs through TanStack Query with the shared 300ms debounce; counts
+// are derived from the claims cache instead of a second ad-hoc fetch.
+import { useState } from 'react';
 import { Search, Shield, Calendar, DollarSign, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react';
-import axios from 'axios';
-
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
-
-const formatDollars = (n) => '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+import { useClaims, usePolicySearch } from '@/lib/queries';
+import useDebounced from '@/features/claims/wizard/useDebounced';
+import { formatDollars } from '@/features/claims/constants';
 
 const statusColors = {
   active: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30',
@@ -21,49 +22,16 @@ const typeColors = {
 
 export default function PolicyLookup() {
   const [query, setQuery] = useState('');
-  const [policies, setPolicies] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const debouncedQuery = useDebounced(query, 300);
+  const policiesQuery = usePolicySearch(debouncedQuery);
+  const claimsQuery = useClaims();
   const [expandedId, setExpandedId] = useState(null);
-  const [claimCounts, setClaimCounts] = useState({});
 
-  const fetchPolicies = useCallback(async (searchQuery) => {
-    try {
-      setLoading(true);
-      const url = searchQuery
-        ? `${API}/policies/search?q=${encodeURIComponent(searchQuery)}`
-        : `${API}/policies`;
-      const res = await axios.get(url);
-      setPolicies(res.data);
-    } catch (e) {
-      console.error('Failed to fetch policies:', e);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchPolicies('');
-  }, [fetchPolicies]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => fetchPolicies(query), 300);
-    return () => clearTimeout(timer);
-  }, [query, fetchPolicies]);
-
-  // Fetch claim counts for policies
-  useEffect(() => {
-    const fetchCounts = async () => {
-      try {
-        const res = await axios.get(`${API}/claims`);
-        const counts = {};
-        res.data.forEach(claim => {
-          counts[claim.policy_number] = (counts[claim.policy_number] || 0) + 1;
-        });
-        setClaimCounts(counts);
-      } catch (e) { /* ignore */ }
-    };
-    fetchCounts();
-  }, []);
+  const policies = policiesQuery.data || [];
+  const claimCounts = (claimsQuery.data || []).reduce((counts, claim) => {
+    if (claim.policy_number) counts[claim.policy_number] = (counts[claim.policy_number] || 0) + 1;
+    return counts;
+  }, {});
 
   return (
     <div className="page-enter" data-testid="policy-lookup-page">
@@ -88,11 +56,22 @@ export default function PolicyLookup() {
       </div>
 
       {/* Results */}
-      {loading ? (
+      {policiesQuery.isLoading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {[1,2,3,4].map(i => (
             <div key={i} className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm p-5 animate-pulse h-40" />
           ))}
+        </div>
+      ) : policiesQuery.isError ? (
+        <div className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm p-8 text-center" data-testid="policy-lookup-error">
+          <AlertCircle className="w-8 h-8 text-[#f59e0b] mx-auto mb-3" />
+          <p className="text-sm text-[#8892a4] mb-3">Policy search failed to load.</p>
+          <button
+            onClick={() => policiesQuery.refetch()}
+            className="text-xs font-mono text-[#3b82f6] hover:text-[#60a5fa] transition-colors duration-200"
+          >
+            Retry
+          </button>
         </div>
       ) : policies.length === 0 ? (
         <div className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm p-8 text-center">
@@ -134,7 +113,9 @@ export default function PolicyLookup() {
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-[#4a5568] font-mono">Claims</div>
-                    <div className="text-sm font-mono text-[#e2e8f0]">{claimCounts[policy.policy_number] || 0}</div>
+                    <div className="text-sm font-mono text-[#e2e8f0]" data-testid={`policy-claims-${policy.policy_number}`}>
+                      {claimCounts[policy.policy_number] || 0}
+                    </div>
                   </div>
                 </div>
 

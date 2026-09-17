@@ -30,6 +30,13 @@ export const dashboardStats = {
   ],
 };
 
+export const sessionUser = {
+  id: 'usr_test1',
+  email: 'adjuster@claimos.dev',
+  role: 'adjuster',
+  createdAt: '2026-09-01T00:00:00Z',
+};
+
 export const workbenchQueueRows = [
   {
     id: 'CLM-1001',
@@ -107,7 +114,17 @@ export const opsAnalytics = {
 };
 
 export const handlers = [
+  // Session restore: every AuthProvider mount probes this endpoint.
+  http.post(`${API_BASE}/auth/refresh`, () =>
+    HttpResponse.json({
+      accessToken: 'test-access-token',
+      tokenType: 'bearer',
+      expiresInSeconds: 900,
+      user: sessionUser,
+    })
+  ),
   http.get(`${API_BASE}/dashboard/stats`, () => HttpResponse.json(dashboardStats)),
+  http.get(`${API_BASE}/claims`, () => HttpResponse.json(dashboardStats.recentClaims)),
   http.get(`${API_BASE}/workbench/queue`, () =>
     HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
   ),
