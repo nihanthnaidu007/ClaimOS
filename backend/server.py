@@ -218,12 +218,18 @@ async def get_dashboard_stats():
     risk_result = await claims_col.aggregate(risk_pipeline).to_list(1)
     avg_risk = round(risk_result[0]["avg"], 1) if risk_result else 0
 
-    # Recent claims
-    recent = await claims_col.find(
-        {},
-        {"_id": 0, "id": 1, "policy_number": 1, "status": 1, "claimed_amount": 1,
-         "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1},
-    ).sort("created_at", -1).to_list(5)
+    # Recent claims; explicit .limit() keeps the cap testable (mongomock's
+    # to_list(length) is unbounded) and identical on real Motor.
+    recent = (
+        await claims_col.find(
+            {},
+            {"_id": 0, "id": 1, "policy_number": 1, "status": 1, "claimed_amount": 1,
+             "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1},
+        )
+        .sort("created_at", -1)
+        .limit(5)
+        .to_list(None)
+    )
 
     active_policies = await policies_col.count_documents({"status": "active"})
 

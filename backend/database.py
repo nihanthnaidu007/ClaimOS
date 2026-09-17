@@ -193,6 +193,16 @@ SEED_HISTORICAL_CLAIMS = [
 ]
 
 
+def _raise_on_real_conflict(exc: BulkWriteError, collection: str) -> None:
+    """Duplicate keys are benign seed races; any other write error is fatal."""
+    write_errors = exc.details.get("writeErrors", [])
+    if any(err.get("code") != 11000 for err in write_errors):
+        raise exc
+    logger.warning(
+        "seed_partial_duplicates_ignored", collection=collection, duplicates=len(write_errors)
+    )
+
+
 async def seed_database():
     """Idempotently seed policies and historical claims.
 
@@ -217,34 +227,32 @@ async def seed_database():
         logger.info("seed_skipped", reason="marker present")
         return
 
+    # Seeded separately: tolerated policy duplicates must not skip claims.
     try:
         await policies_col.insert_many(SEED_POLICIES, ordered=False)
         logger.info("seeded_policies", count=len(SEED_POLICIES))
+    except BulkWriteError as exc:
+        _raise_on_real_conflict(exc, "policies")
 
-        historical_docs = []
-        for i, claim in enumerate(SEED_HISTORICAL_CLAIMS):
-            historical_docs.append(
-                {
-                    "id": f"CLM-HIST-{i + 1:03d}",
-                    "policy_number": claim["policy_number"],
-                    "claim_date": claim["claim_date"],
-                    "incident_date": claim["incident_date"],
-                    "incident_type": claim["incident_type"],
-                    "claimed_amount": claim["claimed_amount"],
-                    "status": claim["status"],
-                    "risk_score": claim["risk_score"],
-                    "decision_reason": claim["decision_reason"],
-                    "agent_trace": {},
-                    "is_historical": True,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+    historical_docs = [
+        {
+            "id": f"CLM-HIST-{i + 1:03d}",
+            "policy_number": claim["policy_number"],
+            "claim_date": claim["claim_date"],
+            "incident_date": claim["incident_date"],
+            "incident_type": claim["incident_type"],
+            "claimed_amount": claim["claimed_amount"],
+            "status": claim["status"],
+            "risk_score": claim["risk_score"],
+            "decision_reason": claim["decision_reason"],
+            "agent_trace": {},
+            "is_historical": True,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        for i, claim in enumerate(SEED_HISTORICAL_CLAIMS)
+    ]
+    try:
         await claims_col.insert_many(historical_docs, ordered=False)
         logger.info("seeded_historical_claims", count=len(historical_docs))
     except BulkWriteError as exc:
-        # A concurrent seeder beat us to some documents: duplicate keys are
-        # benign, anything else is a real seeding failure.
-        write_errors = exc.details.get("writeErrors", [])
-        if any(err.get("code") != 11000 for err in write_errors):
-            raise
-        logger.warning("seed_partial_duplicates_ignored", duplicates=len(write_errors))
+        _raise_on_real_conflict(exc, "claims")
