@@ -2,8 +2,9 @@
 # (api + worker on one backend image, nginx web tier, MongoDB).
 #
 # Run: docker compose up -d --build, then open http://localhost:3000
-# Live agent pipelines need EMERGENT_LLM_KEY in the environment; until the
-# LLM-adapter task lands, the vendored stub raises a clear error on LLM calls.
+# LLM-backed agent pipelines need ANTHROPIC_API_KEY in the environment. The
+# stack starts without it, but pipeline runs fail fast with a typed error
+# from the Anthropic adapter instead of silently degrading.
 
 services:
   api:
@@ -37,7 +38,7 @@ services:
       MONGO_URL: mongodb://mongo:27017/claimos
       DB_NAME: claimos
       UPLOAD_DIR: /data/uploads
-      EMERGENT_LLM_KEY: ${EMERGENT_LLM_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - uploads:/data/uploads
     depends_on:
