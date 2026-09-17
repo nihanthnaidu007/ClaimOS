@@ -30,8 +30,69 @@ export const dashboardStats = {
   ],
 };
 
+export const workbenchQueueRows = [
+  {
+    id: 'CLM-1001',
+    policy_number: 'POL-77',
+    holder_name: 'Grace Hopper',
+    incident_type: 'theft',
+    claimed_amount: 18500,
+    status: 'escalated',
+    risk_score: 0.82,
+    created_at: '2026-09-15T08:00:00+00:00',
+    severity: 'elevated',
+    sla: { targetHours: 24, hoursElapsed: 50, hoursRemaining: -26, breached: true, state: 'breached' },
+  },
+  {
+    id: 'CLM-1002',
+    policy_number: 'POL-12',
+    holder_name: 'Alan Turing',
+    incident_type: 'windshield',
+    claimed_amount: 320,
+    status: 'pending',
+    risk_score: 0.11,
+    created_at: '2026-09-17T06:00:00+00:00',
+    severity: 'low',
+    sla: { targetHours: 72, hoursElapsed: 2, hoursRemaining: 70, breached: false, state: 'ok' },
+  },
+];
+
+export const workbenchCaseSummary = {
+  claimId: 'CLM-1001',
+  holderName: 'Grace Hopper',
+  policyNumber: 'POL-77',
+  incidentType: 'theft',
+  incidentDate: '2026-09-14',
+  claimedAmount: 18500,
+  status: 'escalated',
+  severity: 'elevated',
+  riskScore: 0.82,
+  recommendation: 'escalate',
+  confidence: 0.63,
+  eligibility: { eligible: false, riskFactors: ['high value'], fraudIndicators: [] },
+  coverage: { found: true, statusCheck: 'active', withinLimits: true, adjustedPayout: 18000 },
+  documents: { consistencyScore: 0.94, redFlags: [] },
+  decision: { verdict: null, payoutAmount: null, letterSubject: null, hasLetterBody: false },
+  intakeValid: true,
+  stages: [
+    { agent: 'intake', label: 'Intake', reached: true, status: 'complete', durationMs: 120, reasoning: 'normalized' },
+    { agent: 'policy', label: 'Policy verification', reached: true, status: 'complete', durationMs: 80, reasoning: null },
+    { agent: 'documents', label: 'Document analysis', reached: true, status: 'complete', durationMs: 95, reasoning: null },
+    { agent: 'eligibility', label: 'Eligibility & risk', reached: true, status: 'complete', durationMs: 140, reasoning: null },
+    { agent: 'decision', label: 'Decision', reached: false, status: 'pending', durationMs: null, reasoning: null },
+  ],
+  sla: { targetHours: 24, hoursElapsed: 50, hoursRemaining: -26, breached: true, state: 'breached' },
+  escalationReason: 'high value claim',
+  failureReason: null,
+  override: null,
+  source: 'stored agent traces',
+};
+
 export const handlers = [
   http.get(`${API_BASE}/dashboard/stats`, () => HttpResponse.json(dashboardStats)),
+  http.get(`${API_BASE}/workbench/queue`, () =>
+    HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
+  ),
 ];
 
 // One server instance shared by every suite; tests override behavior via

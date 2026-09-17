@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight } from 'lucide-react';
+import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight, ShieldCheck } from 'lucide-react';
+import { useAuth } from '@/lib/auth';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -21,6 +22,8 @@ export default function Sidebar({ recentClaims = [] }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useAuth();
+  const isAdjuster = user?.role === 'adjuster';
 
   const verdictColor = (status) => {
     if (status === 'approved') return 'bg-[#10b981] text-[#10b981]';
@@ -64,6 +67,16 @@ export default function Sidebar({ recentClaims = [] }) {
             </button>
           );
         })}
+        {isAdjuster && (
+          <button
+            data-testid="nav-workbench"
+            onClick={() => { navigate('/workbench'); setMobileOpen(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2.5 mb-0.5 text-sm font-medium border-l-2 text-[#b79df5] border-transparent hover:text-[#e2e8f0] hover:bg-[#0f1218] hover:border-[#7c3aed]/50 transition-colors duration-200"
+          >
+            <ShieldCheck className="w-4 h-4" strokeWidth={1.5} />
+            Workbench
+          </button>
+        )}
       </nav>
 
       {/* Agent Status */}
