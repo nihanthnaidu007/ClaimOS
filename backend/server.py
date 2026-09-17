@@ -1,12 +1,10 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Optional
 
 import structlog
 from fastapi import APIRouter, FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 from starlette.middleware.cors import CORSMiddleware
 
 from agents import ClaimOrchestrator
@@ -14,6 +12,17 @@ from app.config import settings
 from app.counters import next_claim_number
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
+from app.schemas import (
+    ClaimPdfResponse,
+    ClaimRecord,
+    ClaimSubmission,
+    DashboardStatsResponse,
+    HealthResponse,
+    PolicyRecord,
+    ReadyResponse,
+    RootStatusResponse,
+    SubmitClaimResponse,
+)
 from database import claims_col, db, policies_col, seed_database
 from pdf_generator import generate_claim_pdf
 
@@ -25,19 +34,6 @@ sse_queues = {}
 
 configure_logging(settings.environment)
 logger = structlog.get_logger("claimos.server")
-
-
-# ============ MODELS ============
-
-class ClaimSubmission(BaseModel):
-    policyNumber: str
-    holderName: Optional[str] = ""
-    incidentDate: str
-    incidentType: str
-    claimedAmount: float
-    description: str
-    contactEmail: Optional[str] = ""
-    documentText: Optional[str] = ""
 
 
 # ============ CLAIM ID GENERATOR ============
@@ -85,7 +81,7 @@ async def stream_claim(claim_id: str, request: Request):
 
 # ============ CLAIMS ============
 
-@api_router.post("/claims")
+@api_router.post("/claims", response_model=SubmitClaimResponse)
 async def submit_claim(submission: ClaimSubmission):
     claim_id = await generate_claim_id()
 
@@ -115,13 +111,13 @@ async def submit_claim(submission: ClaimSubmission):
     asyncio.create_task(run_pipeline())
     return response
 
-@api_router.get("/claims")
+@api_router.get("/claims", response_model=list[ClaimRecord])
 async def get_claims():
     claims = await claims_col.find({}, {"_id": 0}).sort("created_at", -1).to_list(100)
     return claims
 
 
-@api_router.get("/claims/{claim_id}")
+@api_router.get("/claims/{claim_id}", response_model=ClaimRecord)
 async def get_claim(claim_id: str):
     claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
@@ -129,7 +125,7 @@ async def get_claim(claim_id: str):
     return claim
 
 
-@api_router.get("/claims/{claim_id}/pdf")
+@api_router.get("/claims/{claim_id}/pdf", response_model=ClaimPdfResponse)
 async def get_claim_pdf(claim_id: str):
     claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
@@ -158,13 +154,13 @@ async def get_claim_pdf(claim_id: str):
 
 # ============ POLICIES ============
 
-@api_router.get("/policies")
+@api_router.get("/policies", response_model=list[PolicyRecord])
 async def get_policies():
     policies = await policies_col.find({}, {"_id": 0}).to_list(100)
     return policies
 
 
-@api_router.get("/policies/lookup")
+@api_router.get("/policies/lookup", response_model=PolicyRecord)
 async def lookup_policy(policy_number: str = ""):
     if not policy_number:
         raise HTTPException(status_code=400, detail="Policy number required")
@@ -174,7 +170,7 @@ async def lookup_policy(policy_number: str = ""):
     return policy
 
 
-@api_router.get("/policies/search")
+@api_router.get("/policies/search", response_model=list[PolicyRecord])
 async def search_policies(q: str = ""):
     if not q:
         return await policies_col.find({}, {"_id": 0}).to_list(100)
@@ -192,7 +188,7 @@ async def search_policies(q: str = ""):
 
 # ============ DASHBOARD ============
 
-@api_router.get("/dashboard/stats")
+@api_router.get("/dashboard/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats():
     total_claims = await claims_col.count_documents({})
     approved = await claims_col.count_documents({"status": "approved"})
@@ -240,18 +236,18 @@ async def get_dashboard_stats():
 
 # ============ HEALTH ============
 
-@api_router.get("/")
+@api_router.get("/", response_model=RootStatusResponse)
 async def root():
     return {"status": "ok", "service": "ClaimOS API", "agents": 5}
 
 
-@api_router.get("/health")
+@api_router.get("/health", response_model=HealthResponse)
 async def health():
     """Liveness probe: the process is up. Never touches the database."""
     return {"status": "ok"}
 
 
-@api_router.get("/ready")
+@api_router.get("/ready", response_model=ReadyResponse)
 async def ready():
     """Readiness probe: verifies MongoDB connectivity with a ping command."""
     try:
