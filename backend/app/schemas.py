@@ -70,6 +70,27 @@ class FraudFlagOut(BaseModel):
     evidence: dict[str, Any] = {}
 
 
+# Settlement methods are a closed vocabulary: reports group on this field.
+SETTLEMENT_METHODS = ("bank_transfer", "cheque", "upi", "other")
+
+
+class SettlementCreate(BaseModel):
+    """Record-only settlement facts. No money moves here by design (spec:
+    real payment rails are out of scope); this is the system of record."""
+
+    amount: float = Field(ge=0, le=CLAIMED_AMOUNT_MAX)
+    method: Literal["bank_transfer", "cheque", "upi", "other"]
+    reference: str = Field(default="", max_length=120)
+
+
+class SettlementRecordOut(BaseModel):
+    amount: float
+    method: str
+    reference: str = ""
+    settled_at: str
+    recorded_by: str
+
+
 class ClaimRecord(BaseModel):
     id: str
     policy_number: str = ""
@@ -99,6 +120,8 @@ class ClaimRecord(BaseModel):
     escalation_reason: str | None = None
     # Per-claim LLM usage rollup attached by the worker at finalize.
     usage: dict[str, Any] | None = None
+    # Record-only settlement facts (no payment rails; settlement PR).
+    settlement: Optional[SettlementRecordOut] = None
 
 
 class ClaimPdfResponse(BaseModel):
@@ -200,7 +223,6 @@ class UploadedDocumentResponse(BaseModel):
     uploaded_at: str
     uploaded_by: str
     sha256: str
-
 
 
 # ---- Auth (auth backend PR) ----
@@ -343,6 +365,13 @@ class AuditEntry(BaseModel):
     after: dict[str, Any] = {}
     reason: str
     at: str
+
+
+class SettlementResponse(BaseModel):
+    claimId: str
+    status: str
+    settlement: SettlementRecordOut
+    auditEntry: AuditEntry
 
 
 class OverrideRequest(BaseModel):

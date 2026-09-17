@@ -31,6 +31,7 @@ from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
 from app.schemas import (
+    AuditEntry,
     ClaimPdfResponse,
     ClaimRecord,
     ClaimSubmission,
@@ -40,6 +41,9 @@ from app.schemas import (
     PolicyRecord,
     ReadyResponse,
     RootStatusResponse,
+    SettlementCreate,
+    SettlementResponse,
+    SettlementRecordOut,
     SubmitClaimResponse,
     UploadedDocumentResponse,
 )
@@ -50,6 +54,7 @@ from app.notify_routes import router as notify_router
 from app.storage import get_provider, new_storage_key, sanitize_filename
 from agents import PIPELINE_STAGES
 from database import (
+    audit_log_col,
     claim_documents_col,
     claims_col,
     db,
@@ -392,6 +397,82 @@ async def list_claim_documents(
         .to_list(100)
     )
     return docs
+
+
+# ============ SETTLEMENT (record-only) ============
+
+
+@api_router.post("/claims/{claim_id}/settlement", response_model=SettlementResponse, status_code=201)
+@limiter.limit("30/minute")
+async def record_claim_settlement(
+    claim_id: str,
+    request: Request,
+    body: SettlementCreate,
+    current_user: UserRecord = Depends(require_adjuster),
+):
+    """Record settlement facts on a claim (spec: record-only).
+
+    No money moves and no payment provider is contacted — this endpoint is
+    the system of record: it stamps who recorded what, appends an audit_log
+    row, and emits a durable event for the case timeline.
+    """
+    claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    if claim.get("settlement"):
+        raise HTTPException(
+            status_code=409,
+            detail="Settlement already recorded for this claim",
+        )
+
+    record = {
+        "amount": body.amount,
+        "method": body.method,
+        "reference": body.reference.strip(),
+        "settled_at": _now(),
+        "recorded_by": current_user.email,
+    }
+    await claims_col.update_one(
+        {"id": claim_id}, {"$set": {"settlement": record}}
+    )
+
+    # Append-only audit: the settlement's reference doubles as the audit
+    # reason (the why-bearer for a record-only action).
+    audit = AuditEntry(
+        id=f"aud_{uuid.uuid4().hex[:12]}",
+        claim_id=claim_id,
+        actor=current_user.id,
+        actor_email=current_user.email,
+        action="settlement_recorded",
+        before={},
+        after=dict(record),
+        reason=record["reference"] or "Settlement recorded (no reference provided)",
+        at=record["settled_at"],
+    )
+    await audit_log_col.insert_one(audit.model_dump().copy())
+
+    await emit_event(
+        claim_id,
+        {
+            "event": "settlement_recorded",
+            "amount": record["amount"],
+            "method": record["method"],
+            "reference": record["reference"],
+            "recordedBy": record["recorded_by"],
+        },
+    )
+    logger.info(
+        "settlement_recorded claim_id=%s amount=%s method=%s",
+        claim_id,
+        record["amount"],
+        record["method"],
+    )
+    return SettlementResponse(
+        claimId=claim_id,
+        status=claim.get("status", ""),
+        settlement=SettlementRecordOut(**record),
+        auditEntry=audit,
+    )
 
 
 # ============ DASHBOARD ============
