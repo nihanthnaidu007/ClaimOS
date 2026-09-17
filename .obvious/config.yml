@@ -1,0 +1,10 @@
+# ClaimOS — repo policy (auto-detected from GitHub settings 2026-09-17)
+default_branch: main
+merge_method: squash   # merge_commit/squash/rebase all allowed upstream; squash chosen for automated setup PRs
+delete_branch_on_merge: false
+
+branches:
+  - main
+
+setup_pr:
+  require_human_approval: true
