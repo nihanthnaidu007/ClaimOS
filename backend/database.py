@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 
 import structlog
@@ -18,6 +19,8 @@ claim_documents_col = db.claim_documents
 counters_col = db.counters
 events_col = db.events
 seed_state_col = db.seed_state
+users_col = db.users
+refresh_tokens_col = db.refresh_tokens
 
 SEED_MARKER_ID = "seed:v1"
 
@@ -256,3 +259,38 @@ async def seed_database():
         logger.info("seeded_historical_claims", count=len(historical_docs))
     except BulkWriteError as exc:
         _raise_on_real_conflict(exc, "claims")
+
+
+async def seed_demo_users() -> None:
+    """Idempotently seed the demo adjuster/customer accounts for development.
+
+    Driven entirely by settings (DEMO_ADJUSTER_EMAIL/PASSWORD and
+    DEMO_CUSTOMER_EMAIL/PASSWORD). An empty email or password skips that role —
+    no known default credential is ever shipped silently. Existing users are
+    never overwritten, so production password rotations survive redeploys.
+    """
+    # Unique index first: the existence check + insert below is not atomic.
+    await users_col.create_index("email", unique=True)
+
+    from app.security import hash_password  # local import: avoids config-at-import cycle risk
+
+    demo_accounts = [
+        (settings.demo_adjuster_email, settings.demo_adjuster_password, "adjuster"),
+        (settings.demo_customer_email, settings.demo_customer_password, "customer"),
+    ]
+    for email, password, role in demo_accounts:
+        if not email or not password:
+            continue
+        email = email.strip().lower()
+        if await users_col.find_one({"email": email}, {"_id": 1}):
+            continue
+        await users_col.insert_one(
+            {
+                "id": f"usr_{secrets.token_hex(8)}",
+                "email": email,
+                "password_hash": hash_password(password),
+                "role": role,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+        logger.info("seeded_demo_user", email=email, role=role)

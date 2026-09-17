@@ -7,7 +7,7 @@ so the current frontend keeps working.
 """
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -116,3 +116,57 @@ class HealthResponse(BaseModel):
 class ReadyResponse(BaseModel):
     status: str
     database: str
+
+
+
+# ---- Auth (auth backend PR) ----
+
+UserRole = Literal["adjuster", "customer"]
+
+# Strict email shape for auth flows (no empty-string variant — that is only
+# valid for optional contact emails on claims).
+_LOGIN_EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+PASSWORD_MIN_LENGTH = 8
+PASSWORD_MAX_LENGTH = 128
+
+
+class UserRecord(BaseModel):
+    """A stored user. `password_hash` is bcrypt; never exposed by any route."""
+
+    id: str
+    email: str
+    password_hash: str
+    role: UserRole
+    created_at: str = ""
+
+
+class PublicUser(BaseModel):
+    """The user fields safe to return to clients."""
+
+    id: str
+    email: str
+    role: UserRole
+    createdAt: str
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(max_length=254, pattern=_LOGIN_EMAIL_PATTERN)
+    password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
+    role: UserRole
+    inviteCode: str = Field(default="", max_length=200)
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=254, pattern=_LOGIN_EMAIL_PATTERN)
+    password: str = Field(min_length=1, max_length=PASSWORD_MAX_LENGTH)
+
+
+class AuthTokensResponse(BaseModel):
+    """Login/refresh response: short-TTL access token in the body (client
+    holds it in memory) — the refresh token travels only as an httpOnly cookie."""
+
+    accessToken: str
+    tokenType: str = "bearer"
+    expiresInSeconds: int
+    user: PublicUser
