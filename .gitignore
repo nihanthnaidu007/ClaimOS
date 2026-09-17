@@ -1,12 +1,13 @@
 # --- ClaimOS gitignore ---
 
 # Environment files and secrets — never commit real credentials
+# (explicit patterns; a wildcard like *.env.* would also hide the tracked
+# .env.example templates and force contributors to git add -f)
 .env
-.env.*
-*.env
-*.env.*
-!.env.example
-!*.env.example
+.env.local
+.env.*.local
+backend/.env*
+!backend/.env.example
 
 # Python
 __pycache__/
