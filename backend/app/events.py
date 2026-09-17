@@ -11,8 +11,13 @@ import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
+import structlog
+
 import database
 from app.counters import next_sequence
+from app.notifications.fanout import dispatch_milestone, milestone_for_event
+
+logger = structlog.get_logger("claimos.events")
 
 # Events that end a claim's story: the SSE stream closes after one of these.
 # run_finalized is the runner's always-last bookkeeping event, so a stream
@@ -46,6 +51,20 @@ async def emit_event(claim_id: str, event: dict) -> int:
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     await database.events_col.insert_one(doc)
+
+    # Milestone fan-out: derived customer notifications fire from the same
+    # choke point every event passes through, and records are unique per
+    # claim+milestone so replays cannot double-notify. A fan-out failure is
+    # logged and dropped — the event write itself must never fail because of
+    # derived data.
+    event_type = doc["event"]
+    if milestone_for_event(event_type, doc["data"]) is not None:
+        try:
+            await dispatch_milestone(claim_id, event_type, doc["data"])
+        except Exception:
+            logger.exception(
+                "notification_fanout_failed", claim_id=claim_id, event=event_type
+            )
     return seq
 
 

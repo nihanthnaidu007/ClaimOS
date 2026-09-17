@@ -73,6 +73,9 @@ class Settings(BaseSettings):
     # polling (one lookup every few seconds per open tab) while still capping
     # code-guessing per IP.
     status_lookup_rate_limit: str = "60/minute"
+    # Notification delivery driver. "console" logs structured notification
+    # events; future drivers (email/sms) implement NotificationProvider.
+    notification_driver: str = "console"
 
     @property
     def refresh_cookie_secure(self) -> bool:

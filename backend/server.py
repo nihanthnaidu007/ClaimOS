@@ -33,6 +33,7 @@ from app.schemas import (
 from app.workbench_routes import router as workbench_router
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
+from app.notify_routes import router as notify_router
 from database import claims_col, db, policies_col, seed_database, seed_demo_users
 from pipeline import enqueue_claim_run
 from pdf_generator import generate_claim_pdf
@@ -165,7 +166,7 @@ async def submit_claim(
     # Durable dispatch: the claim_runs row IS the queue. A worker claims it
     # atomically; the API process never executes the pipeline itself.
     await enqueue_claim_run(claim_id, submission.model_dump(), access_code=access_code)
-    await emit_event(claim_id, "claim_submitted", {"claim_id": claim_id})
+    await emit_event(claim_id, {"event": "claim_submitted", "claim_id": claim_id})
     logger.info("claim_submitted", claim_id=claim_id)
 
     return {
@@ -345,6 +346,7 @@ async def ready():
 api_router.include_router(auth_router)  # /auth/* under the /api prefix
 api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
 api_router.include_router(status_router)  # /status/* public portal endpoints
+api_router.include_router(notify_router)  # /notifications/* authenticated
 app.include_router(api_router)
 
 

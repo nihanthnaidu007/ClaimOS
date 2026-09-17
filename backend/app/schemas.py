@@ -342,3 +342,29 @@ class StatusLookupResponse(BaseModel):
 class StatusLetterResponse(BaseModel):
     pdf: str
     claimId: str
+
+
+# ---- In-app notification center (customer communications PR) ----
+
+
+class NotificationItem(BaseModel):
+    id: str
+    claimId: str
+    milestone: str
+    title: str
+    body: str
+    read: bool = False
+    createdAt: str = ""
+
+
+class NotificationListResponse(BaseModel):
+    notifications: list[NotificationItem] = []
+    unreadCount: int = 0
+
+
+class MarkReadRequest(BaseModel):
+    ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class MarkReadResponse(BaseModel):
+    markedRead: int
