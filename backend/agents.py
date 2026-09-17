@@ -83,6 +83,9 @@ class DecisionOutput(BaseModel):
     letterBody: str = ""
     nextSteps: list[str] = Field(default_factory=list)
     reasoning: str = ""
+    # Calibrated self-reported confidence (0.0-1.0); feeds the STP gate, which
+    # auto-finalizes only claims at or above the configured threshold.
+    confidence: float = Field(default=0.0, ge=0, le=1)
 
 
 async def _complete(agent, system_prompt, user_text, output_schema, claim_id):
@@ -344,6 +347,9 @@ LETTER REQUIREMENTS:
 - Reference specific claim details
 - For approvals: include exact payout amount after deductible
 - Sign as "ClaimOS Claims Processing Team"
+- Set `confidence` to your calibrated confidence (0.0-1.0) in this verdict:
+  1.0 only when every upstream input is complete, consistent, and low-risk;
+  missing evidence, contradictions, or fraud indicators lower it
 
 Return the structured output defined by the response schema."""
 

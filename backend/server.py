@@ -230,14 +230,19 @@ async def search_policies(
 @api_router.get("/dashboard/stats", response_model=DashboardStatsResponse)
 async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuster)):
     total_claims = await claims_col.count_documents({})
-    approved = await claims_col.count_documents({"status": "approved"})
+    # auto_approved (STP-gated) counts as approved; escalated lands in review.
+    approved = await claims_col.count_documents(
+        {"status": {"$in": ["approved", "auto_approved"]}}
+    )
     rejected = await claims_col.count_documents({"status": "rejected"})
-    under_review = await claims_col.count_documents({"status": {"$in": ["under_review", "escalate"]}})
+    under_review = await claims_col.count_documents(
+        {"status": {"$in": ["under_review", "escalate", "escalated"]}}
+    )
     pending = await claims_col.count_documents({"status": "pending"})
 
     # Get total payout
     pipeline_agg = [
-        {"$match": {"status": "approved"}},
+        {"$match": {"status": {"$in": ["approved", "auto_approved"]}}},
         {"$group": {"_id": None, "total": {"$sum": "$claimed_amount"}}}
     ]
     payout_result = await claims_col.aggregate(pipeline_agg).to_list(1)

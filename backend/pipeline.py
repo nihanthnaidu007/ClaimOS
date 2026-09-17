@@ -20,19 +20,35 @@ from pymongo import ReturnDocument
 
 import database
 from agents import PIPELINE_STAGES
+from app.config import settings
 from app.events import emit_event
+from app.stp import assess_claim_severity, evaluate_stp_gate
 from app.usage import UsageLogger
 
 logger = logging.getLogger("claimos.pipeline")
 
-# Run lifecycle: queued -> running -> completed | failed | halted.
+# Run lifecycle: queued -> running -> auto_approved | escalated | failed | halted.
+# A run that reached the Decision agent always ends auto_approved or escalated
+# (the STP gate decides); it never sits in a vague "completed" state.
 RUN_QUEUED = "queued"
 RUN_RUNNING = "running"
-RUN_COMPLETED = "completed"
+RUN_AUTO_APPROVED = "auto_approved"
+RUN_ESCALATED = "escalated"
 RUN_FAILED = "failed"
 RUN_HALTED = "halted"
 
-TERMINAL_RUN_STATUSES = frozenset({RUN_COMPLETED, RUN_FAILED, RUN_HALTED})
+TERMINAL_RUN_STATUSES = frozenset(
+    {RUN_AUTO_APPROVED, RUN_ESCALATED, RUN_FAILED, RUN_HALTED}
+)
+
+# Claim-row status per terminal run status (halts keep the pre-decision
+# "pending" status the original pipeline used).
+_CLAIM_STATUS_BY_RUN = {
+    RUN_AUTO_APPROVED: "auto_approved",
+    RUN_ESCALATED: "escalated",
+    RUN_FAILED: "failed",
+    RUN_HALTED: "pending",
+}
 
 
 def _now() -> str:
@@ -159,7 +175,7 @@ class PipelineRunner:
     async def run(self) -> str:
         """Execute the remaining stages; returns the run's terminal status."""
         checkpoints = self.run.setdefault("stages", {})
-        final_status = RUN_COMPLETED
+        final_status: str | None = None
 
         for stage in PIPELINE_STAGES:
             if checkpoints.get(stage["name"], {}).get("status") == "done":
@@ -183,6 +199,14 @@ class PipelineRunner:
                 final_status = RUN_FAILED
                 break
 
+        if final_status is None:
+            # All stages done and a Decision exists: the STP gate decides
+            # auto-finalization vs escalation (spec AC-5).
+            final_status = await self._apply_stp_gate()
+
+        if final_status != RUN_FAILED:  # the failing stage already saved its row
+            await self._save_claim(status=_CLAIM_STATUS_BY_RUN[final_status])
+
         await self._emit(
             {
                 "event": "run_finalized",
@@ -193,6 +217,62 @@ class PipelineRunner:
         )
         await self._finalize_run(final_status)
         return final_status
+
+    async def _apply_stp_gate(self) -> str:
+        """Straight-through gate after the Decision agent (spec AC-5).
+
+        Every leg must hold — confidence at or above the configured threshold,
+        low derived severity, clean eligibility — for the claim to auto-finalize
+        as auto_approved. Any failing leg escalates, and the escalation reason
+        enumerates exactly which legs failed.
+        """
+        decision = self.state.get("decision") or {}
+        normalized = self.state.get("intake", {}).get("normalizedData", {})
+        severity = assess_claim_severity(
+            claimed_amount=float(normalized.get("claimedAmount", 0) or 0),
+            incident_type=str(normalized.get("incidentType", "") or ""),
+            low_amount_threshold=settings.stp_low_severity_amount,
+            low_types={
+                part.strip().lower()
+                for part in settings.stp_low_severity_types.split(",")
+                if part.strip()
+            },
+        )
+        gate = evaluate_stp_gate(
+            confidence=float(decision.get("confidence", 0.0)),
+            severity=severity,
+            eligibility=self.state.get("eligibility") or {},
+            threshold=settings.stp_confidence_threshold,
+        )
+        self.run["stp"] = {
+            "decision": "auto_approved" if gate.auto_finalize else "escalated",
+            "confidence": decision.get("confidence", 0.0),
+            "severity": severity,
+            "threshold": settings.stp_confidence_threshold,
+        }
+
+        if gate.auto_finalize:
+            await self._emit(
+                {
+                    "event": "stp_finalized",
+                    "decision": "auto_approved",
+                    "confidence": decision.get("confidence", 0.0),
+                    "severity": severity,
+                }
+            )
+            return RUN_AUTO_APPROVED
+
+        reason = gate.escalation_reason()
+        self.run["escalation_reason"] = reason
+        await self._emit(
+            {
+                "event": "stp_escalated",
+                "reason": reason,
+                "confidence": decision.get("confidence", 0.0),
+                "severity": severity,
+            }
+        )
+        return RUN_ESCALATED
 
     async def _execute_stage(self, stage: dict, checkpoints: dict) -> str:
         """Run one agent stage; returns "ok" | "halted" | "failed"."""
@@ -332,6 +412,10 @@ class PipelineRunner:
         }
         if self.run.get("failure_reason"):
             update["$set"]["failure_reason"] = self.run["failure_reason"]
+        if self.run.get("escalation_reason"):
+            update["$set"]["escalation_reason"] = self.run["escalation_reason"]
+        if self.run.get("stp"):
+            update["$set"]["stp"] = self.run["stp"]
         await database.claim_runs_col.update_one(
             {"claim_id": self.claim_id, "attempt": self.run["attempt"]}, update
         )
@@ -373,6 +457,9 @@ class PipelineRunner:
         }
         if failure_reason:
             claim_doc["failure_reason"] = failure_reason
+        if self.run.get("escalation_reason"):
+            claim_doc["escalation_reason"] = self.run["escalation_reason"]
+            claim_doc["stp"] = self.run.get("stp")
 
         doc_text = self.state["input"].get("documentText", "")
         if doc_text:
