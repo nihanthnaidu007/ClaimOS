@@ -145,7 +145,7 @@ function EventRow({ event }) {
 }
 
 export default function TraceTimeline({ trace }) {
-  const logs = trace?.agentLogs || [];
+  const logs = useMemo(() => trace?.agentLogs || [], [trace]);
   const ordered = useMemo(
     () =>
       [...logs].sort(

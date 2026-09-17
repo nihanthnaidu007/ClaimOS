@@ -140,7 +140,7 @@ export function usePipelineEvents({
         // The server closes the stream after a terminal event — that is a
         // normal end, not a failure.
         if (!stopped) setConnectionState('offline');
-      } catch (err) {
+      } catch {
         if (stopped || controller.signal.aborted) return;
         attempt += 1;
         setConnectionState('reconnecting');

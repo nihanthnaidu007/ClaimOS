@@ -44,7 +44,7 @@ export default function ClaimHistory() {
   const [sortKey, setSortKey] = useState('created_at');
   const [sortDir, setSortDir] = useState('desc');
 
-  const claims = claimsQuery.data || [];
+  const claims = useMemo(() => claimsQuery.data || [], [claimsQuery.data]);
 
   const handleSort = (key) => {
     if (sortKey === key) {

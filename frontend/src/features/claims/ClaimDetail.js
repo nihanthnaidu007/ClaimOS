@@ -45,7 +45,7 @@ function useEvidencePackDownload(claimId) {
   return { download, downloading, error };
 }
 
-function DocumentsPanel({ claimId, documents, uploading, onUpload }) {
+function DocumentsPanel({ documents, uploading, onUpload }) {
   return (
     <div className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm p-4" data-testid="documents-panel">
       <div className="flex items-center justify-between mb-3">
@@ -207,7 +207,6 @@ export default function ClaimDetail() {
         </div>
 
         <DocumentsPanel
-          claimId={id}
           documents={documentsQuery.data?.documents || []}
           uploading={uploading}
           onUpload={upload}

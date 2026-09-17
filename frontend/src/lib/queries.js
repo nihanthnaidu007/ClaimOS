@@ -3,7 +3,7 @@
 // Server state lives in the query cache; components never fetch in effects.
 // Keys are centralized so SSE handlers and mutations can target the same
 // cache entries (see usePipelineEvents invalidation).
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import api from './api';
 
 export const queryKeys = {
