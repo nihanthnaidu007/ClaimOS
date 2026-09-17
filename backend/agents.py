@@ -33,6 +33,7 @@ from app.llm.schemas import (
     DecisionResult,
     DocumentAnalysis,
     EligibilityResult,
+    FraudSimilarityOutput,
     IntakeResult,
     PolicyVerification,
     ValidationFlag,
@@ -65,8 +66,11 @@ THIN_DESCRIPTION_WORDS = 30
 AGENT_PARAMS: dict[str, dict] = {
     "intake": {"temperature": 0.0, "max_tokens": 2048},
     "policy": {"temperature": 0.0, "max_tokens": 2048},
-    "eligibility": {"temperature": 0.1, "max_tokens": 2048},
     "document": {"temperature": 0.2, "max_tokens": 3000},
+    # Fraud similarity: one focused judgment over duplicate-fingerprint
+    # candidates; small output (verdict, confidence, cited evidence).
+    "fraud": {"temperature": 0.1, "max_tokens": 2048},
+    "eligibility": {"temperature": 0.1, "max_tokens": 2048},
     "decision": {"temperature": 0.4, "max_tokens": 2500},
 }
 
@@ -151,29 +155,6 @@ def _cached_system(agent_prompt: str) -> list[dict]:
         {"type": "text", "text": PROMPT_PREAMBLE, "cache_control": {"type": "ephemeral"}},
         {"type": "text", "text": agent_prompt},
     ]
-
-
-class FraudCitedEvidence(BaseModel):
-    """One citation: a field of a prior claim record that backs the judgment."""
-
-    from_claim_id: str
-    field: str
-    value: str
-
-
-class FraudSimilarityOutput(BaseModel):
-    """LLM similarity judgment over duplicate-fingerprint candidates.
-
-    The deterministic duplicate rule has already flagged; the model only
-    judges whether the incidents plausibly describe the SAME event. Every
-    cited piece of evidence must come from the claim records included in
-    the prompt — no invented facts.
-    """
-
-    similar: bool
-    confidence: float = Field(default=0.0, ge=0, le=1)
-    reasoning: str = ""
-    cited_evidence: list[FraudCitedEvidence] = Field(default_factory=list)
 
 
 async def _complete(agent, system_prompt, user_text, output_schema, claim_id):

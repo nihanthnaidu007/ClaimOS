@@ -162,3 +162,29 @@ class DecisionResult(BaseModel):
     # Calibrated self-reported confidence (0.0-1.0); feeds the STP gate, which
     # auto-finalizes only claims at or above the configured threshold.
     confidence: float = Field(default=0.0, ge=0, le=1)
+
+
+# ---- Fraud cross-check (runs between documents and eligibility) ------------
+
+
+class FraudCitedEvidence(BaseModel):
+    """One citation: a field of a prior claim record that backs the judgment."""
+
+    from_claim_id: str
+    field: str
+    value: str
+
+
+class FraudSimilarityOutput(BaseModel):
+    """LLM similarity judgment over duplicate-fingerprint candidates.
+
+    The deterministic duplicate rule has already flagged; the model only
+    judges whether the incidents plausibly describe the SAME event. Every
+    cited piece of evidence must come from the claim records included in
+    the prompt — no invented facts.
+    """
+
+    similar: bool
+    confidence: float = Field(default=0.0, ge=0, le=1)
+    reasoning: str = ""
+    cited_evidence: list[FraudCitedEvidence] = Field(default_factory=list)

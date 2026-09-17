@@ -194,7 +194,7 @@ class TestFraudRiskBump:
             coverage_limit=50000.0,
             deductible=500.0,
             claim_frequency_flag=False,
-            consistency_score=95,
+            consistency=None,
             red_flag_count=0,
             fraud_flag_severities=severities,
         )

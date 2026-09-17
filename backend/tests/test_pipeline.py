@@ -213,10 +213,12 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     assert claim is not None
     assert claim["status"] == "auto_approved"
     assert claim["agent_trace"]["decision"]["verdict"] == "approved"
-    # All five validated outputs stored, Decision citations intact (brief: the
-    # dry-run pipeline emits five validated outputs with citations present).
+    # All six validated outputs stored, Decision citations intact (brief: the
+    # dry-run pipeline emits six validated outputs with citations present;
+    # fraud cross-check stores its deterministic flags with no LLM call when
+    # no duplicate-fingerprint candidates exist).
     assert set(claim["agent_trace"].keys()) == {
-        "intake", "policy", "documents", "eligibility", "decision"
+        "intake", "policy", "documents", "fraud", "eligibility", "decision"
     }
     assert claim["agent_trace"]["decision"]["citations"][0]["sourceRef"]
     assert claim["agent_trace"]["documents"]["consistencyScore"] == 90
