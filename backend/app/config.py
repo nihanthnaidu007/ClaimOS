@@ -41,6 +41,49 @@ class Settings(BaseSettings):
     # it stays readable here so the current pipeline keeps working unchanged.
     emergent_llm_key: str = ""
 
+    # ---- Auth & security (auth backend PR) ----
+    # HS256 signing secret for access tokens. MUST be set in any deployed
+    # environment; the validator below fails boot in production when empty.
+    jwt_secret: str = ""
+    # Short-lived access token held in browser memory (never persisted client-side).
+    access_token_ttl_minutes: int = 15
+    # Long-lived refresh token: opaque random value, stored SHA-256-hashed
+    # server-side, delivered as an httpOnly cookie.
+    refresh_token_ttl_days: int = 7
+
+    # Registration is invite-only: REGISTER requires an exact INVITE_CODE match.
+    # An empty code disables registration entirely (production posture).
+    invite_code: str = ""
+
+    # Demo accounts seeded at startup for local development. Passwords are
+    # hashed at rest; an empty password skips seeding that role.
+    demo_adjuster_email: str = ""
+    demo_adjuster_password: str = ""
+    demo_customer_email: str = ""
+    demo_customer_password: str = ""
+
+    # Refresh/CSRF cookie flags. Secure is forced on outside development
+    # (TestClient runs over http, so tests rely on the development default).
+    cookie_secure: bool | None = None
+
+    # Rate limits (slowapi syntax). Applied per client IP.
+    login_rate_limit: str = "5/minute"
+    fnol_rate_limit: str = "10/minute"
+
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        """Secure cookies outside development unless explicitly overridden."""
+        if self.cookie_secure is not None:
+            return self.cookie_secure
+        return self.environment != "development"
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _reject_empty_secret_in_production(cls, value: str, info) -> str:
+        if info.data.get("environment") == "production" and not value:
+            raise ValueError("JWT_SECRET must be set when ENVIRONMENT=production")
+        return value
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
