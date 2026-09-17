@@ -3,8 +3,8 @@ import { Play, CircleDot, CheckCircle2, XCircle, AlertTriangle, Clock, Wrench, C
 import axios from 'axios';
 import RiskGauge from './RiskGauge';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
+const BACKEND_URL = import.meta.env.VITE_API_BASE_URL;
 
 const formatDollars = (n) => {
   if (n == null || isNaN(n)) return '$0.00';

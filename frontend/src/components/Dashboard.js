@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Activity, ShieldCheck, ShieldX, Clock, DollarSign, AlertTriangle, FileText, ArrowRight } from 'lucide-react';
 import axios from 'axios';
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
 
 const formatDollars = (n) => {
   if (n == null) return '$0.00';
