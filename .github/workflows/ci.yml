@@ -1,8 +1,10 @@
 # CI substrate — 7-job pipeline per the CI/CD research doc (art_O0T4HZMZ).
 #
 # Tracking decision (substrate task todo_QNAl5K7v): security-audit runs
-# advisory-only (continue-on-error) until the backend-hardening task adds CVE
-# triage; flip it to blocking then.
+# advisory-only (step-level continue-on-error — the check stays green while
+# findings surface as failed steps) until the backend-hardening task adds CVE
+# triage; remove the flags and flip it to blocking then. Baseline 2026-09-17:
+# pip-audit reports 206 known vulnerabilities in 22 packages (scaffold pins).
 #
 # Frontend jobs are resilient to the in-flight CRA→Vite migration: they prefer
 # package-lock.json (npm ci), fall back to yarn.lock (frozen), then plain npm
@@ -172,8 +174,6 @@ jobs:
   security-audit:
     name: security-audit
     runs-on: ubuntu-latest
-    # Advisory-only for now — see the tracking comment at the top of this file.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -182,13 +182,19 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: pip-audit (backend, against the resolved environment)
-        # pip-audit must be installed into the same venv it runs from — an
-        # outer-env install is invisible to the venv's bin directory (exit 127).
+        # Advisory: step-level continue-on-error keeps the check run green while
+        # findings stay visible as failed steps here in the run UI. Job-level
+        # continue-on-error would NOT do that — it only shields the workflow,
+        # and the job's check run still goes red. Baseline 2026-09-17: 206 known
+        # vulnerabilities in 22 packages (Emergent scaffold pins); the
+        # backend-hardening task adds CVE triage and removes these flags.
+        continue-on-error: true
         run: |
           python -m venv /tmp/audit-venv
           /tmp/audit-venv/bin/pip install pip-audit -r backend/requirements.txt
           /tmp/audit-venv/bin/pip-audit
       - name: npm audit (frontend, production deps only)
+        continue-on-error: true
         run: |
           set -eux
           cd frontend
