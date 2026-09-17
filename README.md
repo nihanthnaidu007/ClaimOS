@@ -114,16 +114,16 @@ cd backend && uvicorn server:app --port 8001    # Ctrl-C after the boot banner
 
 # Frontend production build
 cd frontend && npm run build
-
-# Frontend unit tests (Vitest + Testing Library, API mocked with MSW)
-cd frontend && npm test
 ```
 
-The automated suite covers the agent contracts and the LLM adapter (structured
-outputs, retries, fail-closed behavior) with a mocked Anthropic client. End-to-end
-behavior — SSE streaming, PDF letters, seeded data — is still verified manually:
-start the backend, submit a claim for a seeded policy number from the UI, and
-watch the pipeline stream to a decision letter.
+Frontend testing: Vitest is scaffolded (config, scripts, Testing Library deps)
+but the suite has no test files at this baseline — `npm test` exits 1 until
+frontend tests are added. The automated backend suite covers the agent
+contracts and the LLM adapter (structured outputs, retries, fail-closed
+behavior) with a mocked Anthropic client. End-to-end behavior — SSE streaming,
+PDF letters, seeded data — is verified manually: start the backend, submit a
+claim for a seeded policy number from the UI, and watch the pipeline stream to
+a decision letter.
 
 ## License
 
