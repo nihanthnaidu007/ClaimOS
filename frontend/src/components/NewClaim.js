@@ -22,11 +22,12 @@ const AGENT_META = {
   INTAKE_AGENT: { index: 1, label: 'Intake & Validation', desc: 'Validating claim fields and normalizing data', icon: '01' },
   POLICY_AGENT: { index: 2, label: 'Policy Verification', desc: 'Querying policy database for coverage verification', icon: '02' },
   DOCUMENT_AGENT: { index: 3, label: 'Document Analysis', desc: 'Analyzing claim documents for evidence and consistency', icon: '03' },
-  ELIGIBILITY_AGENT: { index: 4, label: 'Eligibility & Risk', desc: 'Calculating risk score and eligibility verdict', icon: '04' },
-  DECISION_AGENT: { index: 5, label: 'Decision & Communication', desc: 'Issuing final verdict and drafting communication', icon: '05' },
+  FRAUD_AGENT: { index: 4, label: 'Fraud Cross-Check', desc: 'Running deterministic fraud rules and duplicate-incident similarity', icon: '04' },
+  ELIGIBILITY_AGENT: { index: 5, label: 'Eligibility & Risk', desc: 'Calculating risk score and eligibility verdict', icon: '05' },
+  DECISION_AGENT: { index: 6, label: 'Decision & Communication', desc: 'Issuing final verdict and drafting communication', icon: '06' },
 };
 
-const AGENT_ORDER = ['INTAKE_AGENT', 'POLICY_AGENT', 'DOCUMENT_AGENT', 'ELIGIBILITY_AGENT', 'DECISION_AGENT'];
+const AGENT_ORDER = ['INTAKE_AGENT', 'POLICY_AGENT', 'DOCUMENT_AGENT', 'FRAUD_AGENT', 'ELIGIBILITY_AGENT', 'DECISION_AGENT'];
 
 // ============ FORM COMPONENT ============
 function ClaimForm({ onSubmit, submitting }) {

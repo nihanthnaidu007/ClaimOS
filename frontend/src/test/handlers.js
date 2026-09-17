@@ -26,6 +26,9 @@ export const dashboardStats = {
       incident_type: 'collision',
       claimed_amount: 4200,
       status: 'approved',
+      fraud_flags: [
+        { code: 'duplicate_incident', severity: 'high', detail: 'Matches prior claim CLM-0009', evidence: { duplicate_of_claim_id: 'CLM-0009' } },
+      ],
     },
   ],
 };

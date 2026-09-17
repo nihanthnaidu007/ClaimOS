@@ -24,9 +24,16 @@ const AGENT_NAMES = [
   { key: 'intake', label: 'Intake Agent' },
   { key: 'policy', label: 'Policy Verification Agent' },
   { key: 'documents', label: 'Document Analysis Agent' },
+  { key: 'fraud', label: 'Fraud Cross-Check Agent' },
   { key: 'eligibility', label: 'Eligibility & Risk Agent' },
   { key: 'decision', label: 'Decision & Communication Agent' },
 ];
+
+// Queue badge color follows the highest fraud-flag severity on the claim.
+const fraudBadgeClass = (flags) =>
+  (flags || []).some(f => f.severity === 'high')
+    ? 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30'
+    : 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30';
 
 export default function ClaimHistory() {
   const [claims, setClaims] = useState([]);
@@ -140,8 +147,19 @@ export default function ClaimHistory() {
                   </span>
                 </div>
                 <div className="col-span-2">
-                  <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${verdictColors[claim.status] || verdictColors.pending}`}>
-                    {(claim.status || 'pending').toUpperCase().replace('_', ' ')}
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${verdictColors[claim.status] || verdictColors.pending}`}>
+                      {(claim.status || 'pending').toUpperCase().replace('_', ' ')}
+                    </span>
+                    {(claim.fraud_flags || []).length > 0 && (
+                      <span
+                        data-testid={`fraud-flag-${claim.id}`}
+                        title={(claim.fraud_flags || []).map(f => f.detail || f.code).join('; ')}
+                        className={`inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono font-bold border rounded-none ${fraudBadgeClass(claim.fraud_flags)}`}
+                      >
+                        FLAGGED
+                      </span>
+                    )}
                   </span>
                 </div>
                 <div className="col-span-2 flex items-center justify-between">

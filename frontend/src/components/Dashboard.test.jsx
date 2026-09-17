@@ -31,6 +31,39 @@ describe('Dashboard', () => {
     expect(screen.getAllByText('APPROVED')).toHaveLength(2);
   });
 
+  it('renders the fraud FLAGGED badge for flagged recent claims', async () => {
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('dashboard')).toBeInTheDocument()
+    );
+
+    const badge = screen.getByTestId('fraud-flag-CLM-0001');
+    expect(badge).toHaveTextContent('FLAGGED');
+    // High severity renders in the red alert tone (fixture flag severity).
+    expect(badge.className).toContain('ef4444');
+  });
+
+  it('renders no fraud badge for claims without fraud flags', async () => {
+    server.use(
+      http.get(
+        `${import.meta.env.VITE_API_BASE_URL}/api/dashboard/stats`,
+        () =>
+          HttpResponse.json({
+            ...dashboardStats,
+            recentClaims: [{ ...dashboardStats.recentClaims[0], fraud_flags: [] }],
+          })
+      )
+    );
+
+    renderDashboard();
+
+    await waitFor(() =>
+      expect(screen.getByTestId('dashboard')).toBeInTheDocument()
+    );
+    expect(screen.queryByTestId('fraud-flag-CLM-0001')).not.toBeInTheDocument();
+  });
+
   it('falls back to zeroed state when the stats API errors', async () => {
     // Silence the component's console.error — the failure is the scenario
     // under test, not unexpected noise.

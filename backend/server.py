@@ -512,7 +512,8 @@ async def get_dashboard_stats(current_user: UserRecord = Depends(require_adjuste
         await claims_col.find(
             {},
             {"_id": 0, "id": 1, "policy_number": 1, "status": 1, "claimed_amount": 1,
-             "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1},
+             "risk_score": 1, "holder_name": 1, "incident_type": 1, "created_at": 1,
+             "fraud_flags": 1},
         )
         .sort("created_at", -1)
         .limit(5)
