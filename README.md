@@ -32,10 +32,10 @@ complete per-agent reasoning trace.
 | LLM | Anthropic adapter: structured outputs, retries, usage logging | `backend/app/llm/adapter.py` |
 | Data | MongoDB via Motor, seeded demo data | `backend/database.py` |
 | PDF | fpdf2 decision letters (base64 over JSON) | `backend/pdf_generator.py` |
-| Web | React 19 + CRA/craco, Tailwind, shadcn/radix | `frontend/` |
+| Web | React 19 + Vite 7 (Vitest), Tailwind, shadcn/radix | `frontend/` |
 
 ```
-frontend (CRA dev server, :3000)
+frontend (Vite dev server, :5173)
    │  POST /api/claims ──────────► FastAPI (:8001)
    │  GET  /api/claims/stream/{id} ◄── SSE: one event per agent step
    ▼
@@ -71,7 +71,7 @@ vars — the backend loads `backend/.env` on startup.
 | `ANTHROPIC_API_KEY` | backend | no* | empty | Key for the LLM adapter; the first real LLM call fails closed if unset |
 | `LLM_MAX_RETRIES` | backend | no | `3` | Bounded retries per LLM call |
 | `LLM_TIMEOUT_S` | backend | no | `60` | Per-call timeout in seconds |
-| `REACT_APP_BACKEND_URL` | frontend | yes | `http://localhost:8001` | API base URL, baked into the bundle at build time |
+| `VITE_API_BASE_URL` | frontend | no | `http://localhost:8001` | API base URL; `VITE_*` vars are exposed to client code at build time — set it for any non-local deployment |
 
 \* Required in practice: adjudication needs LLM calls, and the adapter refuses
 to run them without a key.
@@ -95,8 +95,9 @@ The API serves on `http://localhost:8001`; `GET /api/` is a health check.
 
 ```bash
 cd frontend
-npm install          # (the project historically used Yarn 1; npm works too)
-npm start            # dev server on http://localhost:3000
+cp .env.example .env    # sets VITE_API_BASE_URL for local development
+npm install             # Vite toolchain — no peer-dep flags needed
+npm run dev             # dev server on http://localhost:5173
 ```
 
 ## Testing
@@ -113,6 +114,9 @@ cd backend && uvicorn server:app --port 8001    # Ctrl-C after the boot banner
 
 # Frontend production build
 cd frontend && npm run build
+
+# Frontend unit tests (Vitest + Testing Library, API mocked with MSW)
+cd frontend && npm test
 ```
 
 The automated suite covers the agent contracts and the LLM adapter (structured
