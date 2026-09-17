@@ -7,6 +7,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
+from app.events import emit_event
 from app.llm.adapter import LLMAdapter, get_adapter
 from database import claims_col, policies_col
 
@@ -338,7 +339,12 @@ class ClaimOrchestrator:
         }
     
     async def stream(self, data):
+        """Fan out to the live queue and the durable event log."""
         await self.queue.put(data)
+        try:
+            await emit_event(self.claim_id, data)
+        except Exception:  # noqa: BLE001 — live streaming must survive a durability hiccup
+            logger.exception("event_persist_failed for claim %s", self.claim_id)
     
     async def run(self, form_data):
         self.state['input'] = form_data
