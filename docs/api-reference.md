@@ -162,11 +162,13 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 
 ## Status portal (public — credential-bearing POSTs)
 
-Both routes are POSTs because the access code is a credential: keeping it out of URLs and access logs matters more than cache friendliness. Both are rate-limited per client IP (`STATUS_LOOKUP_RATE_LIMIT`, default `60/minute`) and non-enumerable — unknown claim number, wrong code, and claims without a decision all return the same generic `404` `{"detail": "Claim not found"}`.
+The first two routes are POSTs because the access code is a credential: keeping it out of URLs and access logs matters more than cache friendliness. Lookup and decision-letter are rate-limited per client IP (`STATUS_LOOKUP_RATE_LIMIT`, default `60/minute`) and non-enumerable — unknown claim number, wrong code, and claims without a decision all return the same generic `404` `{"detail": "Claim not found"}`.
 
 **`POST /api/status/lookup`** — request: `claimNumber` (matches `CLM-YYYYMMDD-N` or `CLM-HIST-N`) and `accessCode` (16–200 chars). → `200` `StatusLookupResponse` — the masked portal payload: `{claimNumber, firstName, status, statusLabel, currentStage, incidentType, decisionOutcome, decisionReady, pdfAvailable, milestones: [{key, label, at, done}]}`. Amounts, contact details, and policy numbers never appear.
 
 **`POST /api/status/decision-letter`** — same request shape. → `200` `{"pdf": "<base64 PDF>", "claimId"}` when a decision exists; the generic `404` otherwise (there is nothing to reveal).
+
+**`POST /api/status/recover-access-code`** — request: `claimNumber` and `contactEmail` (both trimmed; the email is matched exactly against the claim's contact email, case-insensitively). On a match the portal access code is rotated (the old code stops working immediately) and the new code is emailed to the stored address. → `200` `{"status": "ok", "message": "If this claim number and email match a claim on file, a new access code has been sent to that address."}` — the same fixed response for matches and every mismatch (unknown number, unknown email, claim filed without an email), so the endpoint reveals nothing about which claims or addresses exist. Rate-limited per client IP (`ACCESS_CODE_RECOVERY_RATE_LIMIT`, default `3/minute` — a match sends a real email).
 
 ## Notifications (any authenticated user)
 

@@ -81,9 +81,48 @@ class Settings(BaseSettings):
     # polling (one lookup every few seconds per open tab) while still capping
     # code-guessing per IP.
     status_lookup_rate_limit: str = "60/minute"
-    # Notification delivery driver. "console" logs structured notification
-    # events; future drivers (email/sms) implement NotificationProvider.
-    notification_driver: str = "console"
+    # Access-code recovery (F1): stricter than status lookup because a match
+    # triggers a real email (address-harvesting / mail-bomb vector).
+    access_code_recovery_rate_limit: str = "3/minute"
+
+    # ---- Email delivery (F1) ----
+    # Customer-email channel: "console" logs structured events (the dev/CI
+    # default — byte-identical to the pre-email behavior); "smtp" delivers
+    # real email over SMTP.
+    email_provider: Literal["console", "smtp"] = "console"
+    # SMTP connection details (required when email_provider="smtp").
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    # STARTTLS on the plain connection (port 587) by default; smtp_ssl
+    # switches to implicit TLS (port 465).
+    smtp_use_tls: bool = True
+    smtp_ssl: bool = False
+    # Explicit kill switch — the validator below accepts either a working
+    # email configuration or this flag in production, never silence.
+    email_disabled: bool = False
+
+    @field_validator("email_disabled")
+    @classmethod
+    def _production_requires_email_plan(cls, value: bool, info) -> bool:
+        """Production must either deliver email (SMTP host and sender
+        configured) or explicitly disable it — a default config that silently
+        sends nothing must not boot (AC-1.4)."""
+        if info.data.get("environment") != "production" or value:
+            return value
+        configured = (
+            info.data.get("email_provider") == "smtp"
+            and bool(info.data.get("smtp_host"))
+            and bool(info.data.get("smtp_from"))
+        )
+        if configured:
+            return value
+        raise ValueError(
+            "ENVIRONMENT=production requires EMAIL_PROVIDER=smtp with SMTP_HOST and SMTP_FROM "
+            "set, or an explicit EMAIL_DISABLED=true"
+        )
 
     @property
     def refresh_cookie_secure(self) -> bool:
