@@ -276,6 +276,13 @@ jobs:
           mkdir -p frontend/test-results/compose-logs
           docker compose ps | tee frontend/test-results/compose-logs/compose-ps.txt
           docker compose logs --no-color api worker | tee frontend/test-results/compose-logs/api-worker.log
+          # Web tier is the hop between the browser and the api — its nginx
+          # access/error log is the missing witness when a response the api
+          # definitely sent (uvicorn access-log 201) never fires Playwright's
+          # response event. nginx -T also proves the rendered template.
+          docker compose logs --no-color web | tee frontend/test-results/compose-logs/web.log
+          docker compose exec -T web nginx -T 2>&1 | tee frontend/test-results/compose-logs/nginx-rendered.conf || true
+          docker inspect --format '{{json .State.Health}}' claimos-web-1 | tee frontend/test-results/compose-logs/web-health.json || true
       - name: Recreate the worker with a forced agent failure
         run: |
           FIXTURE_FAULT=timeout:intake docker compose up -d --no-deps --force-recreate worker
