@@ -58,6 +58,7 @@
     "dev": "vite",
     "build": "vite build",
     "test": "vitest run",
+    "test:e2e": "playwright test",
     "preview": "vite preview",
     "coverage": "vitest run --coverage"
   },

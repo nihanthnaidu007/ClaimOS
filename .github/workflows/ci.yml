@@ -213,7 +213,88 @@ jobs:
             npm audit --omit=dev
           fi
 
-  # ---- 7. lint-workflows ----------------------------------------------------
+  # ---- 7. e2e-compose -------------------------------------------------------
+  # Full-stack Playwright run against the docker-compose topology (nginx web
+  # tier + api + durable worker + Mongo) on the deterministic fixture LLM —
+  # zero Anthropic API spend. Fault-injected worker recreations then cover
+  # the live-LLM failure classes: forced agent failure and the decision
+  # refusal-retry/template-letter fallback.
+  e2e-compose:
+    name: e2e-compose
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Fixture mode keeps the pipeline scripted: deterministic and free.
+      LLM_PROVIDER: fixture
+      INVITE_CODE: fnol-e2e-invite
+      # The suite logs in several users per spec file; the default 5/minute
+      # login limit would trip it.
+      LOGIN_RATE_LIMIT: 30/minute
+      # Low enough that the portal rate-limit spec reaches 429 in a few
+      # requests; high enough that the 10s portal poller never trips it.
+      STATUS_LOOKUP_RATE_LIMIT: 10/minute
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend deps + Playwright Chromium
+        working-directory: frontend
+        run: |
+          set -eux
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+          npx playwright install --with-deps chromium
+      - name: Boot the compose stack (fixture LLM)
+        run: docker compose up -d --build
+      - name: Wait for /api/ready and the web tier
+        run: |
+          set -eux
+          for i in $(seq 1 60); do
+            curl -fsS http://localhost:8000/api/ready >/dev/null 2>&1 && break
+            sleep 2
+          done
+          curl -fsS http://localhost:8000/api/ready
+          for i in $(seq 1 30); do
+            [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)" = "200" ] && break
+            sleep 2
+          done
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:3000/)" = "200" ]
+      - name: Run the Playwright suite (clean fixture stack)
+        working-directory: frontend
+        run: npx playwright test
+      - name: Recreate the worker with a forced agent failure
+        run: |
+          FIXTURE_FAULT=timeout:intake docker compose up -d --no-deps --force-recreate worker
+          sleep 3
+      - name: Run the forced-failure spec
+        working-directory: frontend
+        env:
+          FIXTURE_FAULT: timeout:intake
+        run: npx playwright test e2e/agent-failure.spec.js
+      - name: Recreate the worker with a persistent decision refusal
+        run: |
+          FIXTURE_FAULT=refusal:decision docker compose up -d --no-deps --force-recreate worker
+          sleep 3
+      - name: Run the refusal-fallback spec
+        working-directory: frontend
+        env:
+          FIXTURE_FAULT: refusal:decision
+        run: npx playwright test e2e/refusal-fallback.spec.js
+      - name: Upload Playwright artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-artifacts
+          path: frontend/test-results/
+          retention-days: 5
+
+  # ---- 8. lint-workflows ----------------------------------------------------
   lint-workflows:
     name: lint-workflows
     runs-on: ubuntu-latest

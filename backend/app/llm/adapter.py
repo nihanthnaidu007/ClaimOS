@@ -378,15 +378,23 @@ def get_adapter() -> LLMAdapter:
     """Process-wide adapter (lazy client construction keeps import/boot key-free)."""
     global _adapter
     if _adapter is None:
-        # The config field is the deployment-facing knob; LLM_TIMEOUT_S keeps
-        # priority for direct env overrides. Before this wiring, the field was
-        # dead code — the singleton silently used DEFAULT_TIMEOUT_S (60s),
-        # which killed 3000-token eligibility generations mid-flight.
-        _adapter = LLMAdapter(
-            timeout_s=float(
-                os.environ.get(
-                    "LLM_TIMEOUT_S", str(settings.llm_request_timeout_seconds)
+        # Fixture provider: deterministic outputs + fault injection, zero API
+        # spend — the E2E/CI mode (docker-compose sets LLM_PROVIDER=fixture).
+        # Import happens here so `import app.llm.adapter` stays anthropic-only.
+        if settings.llm_provider == "fixture":
+            from app.llm.fixture import FixtureLLMAdapter
+
+            _adapter = FixtureLLMAdapter()
+        else:
+            # The config field is the deployment-facing knob; LLM_TIMEOUT_S keeps
+            # priority for direct env overrides. Before this wiring, the field was
+            # dead code — the singleton silently used DEFAULT_TIMEOUT_S (60s),
+            # which killed 3000-token eligibility generations mid-flight.
+            _adapter = LLMAdapter(
+                timeout_s=float(
+                    os.environ.get(
+                        "LLM_TIMEOUT_S", str(settings.llm_request_timeout_seconds)
+                    )
                 )
             )
-        )
     return _adapter
