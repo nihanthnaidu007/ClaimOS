@@ -110,7 +110,11 @@ export function usePipelineEvents({
 
     const invalidate = () => {
       for (const prefix of invalidateRef.current) {
-        queryClient.invalidateQueries({ queryKey: [...prefix, claimId] });
+        // Each entry is a query-key PREFIX (e.g. 'claims' → ['claims',
+        // claimId]). Spreading the string instead produced per-character
+        // keys that matched nothing — the stream-close refetch silently
+        // never fired and the decision panel never rendered.
+        queryClient.invalidateQueries({ queryKey: [prefix, claimId] });
       }
     };
 
