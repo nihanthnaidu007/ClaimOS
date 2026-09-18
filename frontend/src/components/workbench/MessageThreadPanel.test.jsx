@@ -1,19 +1,14 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, afterEach } from 'vitest';
+import { http, HttpResponse } from 'msw';
 
-import { api } from '@/lib/api';
 import MessageThreadPanel from './MessageThreadPanel';
+import { server } from '../../test/handlers';
 
-vi.mock('@/lib/api', () => ({
-  api: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-}));
-
+const API_BASE = `${import.meta.env.VITE_API_BASE_URL}/api`;
 const claimId = 'CLM-MSG-1';
-const THREAD_URL = `/workbench/claims/${claimId}/messages`;
+const threadUrl = `${API_BASE}/workbench/claims/${claimId}/messages`;
 
 const thread = [
   {
@@ -37,19 +32,16 @@ const thread = [
 ];
 
 function mockThread(messages = thread) {
-  api.get.mockResolvedValue({ data: { claimId, messages } });
+  server.use(http.get(threadUrl, () => HttpResponse.json({ claimId, messages })));
 }
 
 describe('MessageThreadPanel (adjuster case view)', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockThread([]);
-  });
+  afterEach(() => server.resetHandlers());
 
   it('shows an empty state before any messages exist', async () => {
+    mockThread([]);
     render(<MessageThreadPanel claimId={claimId} />);
     expect(await screen.findByText(/no messages yet/i)).toBeInTheDocument();
-    expect(api.get).toHaveBeenCalledWith(THREAD_URL);
   });
 
   it('renders the thread chronologically with role labels', async () => {
@@ -63,8 +55,19 @@ describe('MessageThreadPanel (adjuster case view)', () => {
 
   it('sends a message and refetches the thread', async () => {
     const user = userEvent.setup();
-    api.post.mockResolvedValue({ data: {} });
-    mockThread([]);
+    const bodies = [];
+    let listCalls = 0;
+    server.use(
+      http.get(threadUrl, () => {
+        listCalls += 1;
+        return HttpResponse.json({ claimId, messages: [] });
+      }),
+      http.post(threadUrl, async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({}, { status: 201 });
+      })
+    );
+
     render(<MessageThreadPanel claimId={claimId} />);
     await screen.findByText(/no messages yet/i);
 
@@ -72,10 +75,10 @@ describe('MessageThreadPanel (adjuster case view)', () => {
     await user.click(screen.getByRole('button', { name: /send message/i }));
 
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith(THREAD_URL, { body: 'Reply incoming' });
+      expect(bodies).toEqual([{ body: 'Reply incoming' }]);
     });
     await waitFor(() => {
-      expect(api.get).toHaveBeenCalledTimes(2);
+      expect(listCalls).toBe(2);
     });
   });
 
@@ -99,7 +102,8 @@ describe('MessageThreadPanel (adjuster case view)', () => {
 
   it('surfaces a rate-limit message on 429 and keeps the draft', async () => {
     const user = userEvent.setup();
-    api.post.mockRejectedValue({ response: { status: 429 } });
+    mockThread([]);
+    server.use(http.post(threadUrl, () => new HttpResponse(null, { status: 429 })));
     render(<MessageThreadPanel claimId={claimId} />);
     await screen.findByText(/no messages yet/i);
 
@@ -112,7 +116,8 @@ describe('MessageThreadPanel (adjuster case view)', () => {
 
   it('surfaces a length-cap message on 422', async () => {
     const user = userEvent.setup();
-    api.post.mockRejectedValue({ response: { status: 422 } });
+    mockThread([]);
+    server.use(http.post(threadUrl, () => new HttpResponse(null, { status: 422 })));
     render(<MessageThreadPanel claimId={claimId} />);
     await screen.findByText(/no messages yet/i);
 
@@ -123,7 +128,8 @@ describe('MessageThreadPanel (adjuster case view)', () => {
   });
 
   it('offers a retry when the thread fails to load', async () => {
-    api.get.mockRejectedValue(new Error('network down'));
+    mockThread([]);
+    server.use(http.get(threadUrl, () => new HttpResponse(null, { status: 503 })));
     render(<MessageThreadPanel claimId={claimId} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(/could not load/i);
 
