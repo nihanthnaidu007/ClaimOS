@@ -28,6 +28,7 @@ import {
 } from '@/lib/workbench';
 import DocumentRequests from './DocumentRequests';
 import OverrideModal from './OverrideModal';
+import MessageThreadPanel from './MessageThreadPanel';
 
 const STAGE_ORDER = ['intake', 'policy', 'documents', 'fraud', 'eligibility', 'decision'];
 
@@ -544,6 +545,8 @@ export default function CaseView() {
       <DocumentUploads claimId={summary.claimId} />
 
       <DocumentRequests claimId={summary.claimId} />
+
+      <MessageThreadPanel claimId={summary.claimId} />
 
       <AuditTrail entries={audit} />
 

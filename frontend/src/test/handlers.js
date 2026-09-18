@@ -199,6 +199,12 @@ export const handlers = [
     return HttpResponse.json({ data: body.data, updatedAt: new Date().toISOString() });
   }),
 
+  // F5 claim messaging: the case-view thread reads the (empty by default)
+  // conversation so CaseView suites render under onUnhandledRequest: 'error'.
+  http.get(`${API_BASE}/workbench/claims/:claimId/messages`, () =>
+    HttpResponse.json({ claimId: 'CLM-1001', messages: [] })
+  ),
+
   // Policy lookup: an ACTIVE PolicyRecord (snake_case, like the backend).
   http.get(`${API_BASE}/policies/lookup`, ({ request }) => {
     const url = new URL(request.url);
