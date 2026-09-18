@@ -147,6 +147,42 @@ export const handlers = [
     )
   ),
 
+  // Document checklists (spec F3): an empty checklist by default; tests
+  // override with server.use(...) to script lists, mutations, and failures.
+  http.get(`${API_BASE}/claims/:claimId/document-requests`, () => HttpResponse.json([])),
+  http.post(`${API_BASE}/claims/:claimId/document-requests`, async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(
+      {
+        id: 'dreq_new_1',
+        claim_id: 'CLM-1001',
+        title: body.title,
+        description: body.description || '',
+        status: 'requested',
+        requested_by: 'usr_test1',
+        document_id: null,
+        created_at: '2026-09-17T10:10:00+00:00',
+        updated_at: '2026-09-17T10:10:00+00:00',
+      },
+      { status: 201 }
+    );
+  }),
+  http.patch(`${API_BASE}/claims/:claimId/document-requests/:requestId`, async ({ request }) => {
+    const body = await request.json();
+    const waived = Boolean(body.waive);
+    return HttpResponse.json({
+      id: 'dreq_new_1',
+      claim_id: 'CLM-1001',
+      title: body.title || 'Repair estimate',
+      description: body.description || '',
+      status: waived ? 'waived' : 'requested',
+      requested_by: 'usr_test1',
+      document_id: null,
+      created_at: '2026-09-17T10:10:00+00:00',
+      updated_at: '2026-09-17T11:00:00+00:00',
+    });
+  }),
+
   // FNOL wizard: no server draft by default (404 = local copy is truth);
   // PUT echoes the upsert the useWizardDraft autosave performs.
   http.get(`${API_BASE}/fnol/drafts/:draftId`, () => new HttpResponse(null, { status: 404 })),
