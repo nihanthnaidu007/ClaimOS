@@ -128,14 +128,27 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   // The persisted claim state is terminal — no pending pill.
   await expect(page.getByTestId('claim-status-pill')).not.toContainText(/pending/i);
 
-  // Upload a supporting PDF on the claim detail surface.
+  // Upload a supporting PDF on the claim detail surface. Both network legs
+  // are observed so a failure names the offending response (upload POST
+  // status, refetch GET status) instead of a silent 30s locator timeout.
   const rowsBefore = await page.getByTestId('document-row').count();
+  const refetchGet = page.waitForResponse(
+    (r) => r.url().includes('/documents') && r.request().method() === 'GET',
+    { timeout: 30_000 }
+  );
   await page
     .setInputFiles('[data-testid="document-upload-input"]', {
       name: 'repair-estimate.pdf',
       mimeType: 'application/pdf',
       buffer: tinyPdf('detail-repair-estimate'),
     });
+  const uploadPost = await page.waitForResponse(
+    (r) => r.url().includes('/documents') && r.request().method() === 'POST',
+    { timeout: 30_000 }
+  );
+  expect(uploadPost.status(), 'upload POST must return 201').toBe(201);
+  const refetch = await refetchGet;
+  expect(refetch.status(), 'documents refetch must return 200').toBe(200);
   await expect(page.getByTestId('document-row')).toHaveCount(rowsBefore + 1, {
     timeout: 30_000,
   });
