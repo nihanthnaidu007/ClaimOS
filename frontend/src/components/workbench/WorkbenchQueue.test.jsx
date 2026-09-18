@@ -258,6 +258,62 @@ describe('WorkbenchQueue', () => {
     pushFrame({ event: 'unknown_event', rows: [{ id: 'CLM-9999' }] });
     expect(screen.queryByText('CLM-9999')).not.toBeInTheDocument();
   });
+
+  // ---- Assignment filter chips (spec F10) ----
+
+  it('renders the Mine / Unassigned / All chips with All active by default', async () => {
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+
+    expect(screen.getByTestId('filter-assignee')).toBeInTheDocument();
+    expect(screen.getByTestId('assignee-chip-mine')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('assignee-chip-unassigned')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('assignee-chip-all')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('sends assignee=mine|unassigned for the chips and omits the param for All', async () => {
+    const capturedUrls = [];
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, ({ request }) => {
+        capturedUrls.push(request.url);
+        return HttpResponse.json({
+          rows: workbenchQueueRows,
+          generatedAt: '2026-09-17T10:00:00+00:00',
+        });
+      })
+    );
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+    expect(new URL(capturedUrls[0]).searchParams.has('assignee')).toBe(false);
+
+    fireEvent.click(screen.getByTestId('assignee-chip-mine'));
+    await waitFor(() => {
+      const url = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(url.searchParams.get('assignee')).toBe('mine');
+    });
+
+    fireEvent.click(screen.getByTestId('assignee-chip-unassigned'));
+    await waitFor(() => {
+      const url = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(url.searchParams.get('assignee')).toBe('unassigned');
+    });
+
+    fireEvent.click(screen.getByTestId('assignee-chip-all'));
+    await waitFor(() => {
+      const url = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(url.searchParams.get('assignee')).toBeNull();
+    });
+  });
+
+  it('marks only the active assignment chip with aria-pressed', async () => {
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+
+    fireEvent.click(screen.getByTestId('assignee-chip-unassigned'));
+    expect(screen.getByTestId('assignee-chip-unassigned')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('assignee-chip-mine')).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByTestId('assignee-chip-all')).toHaveAttribute('aria-pressed', 'false');
+  });
 });
 
 // ---- F12: bulk actions ----
