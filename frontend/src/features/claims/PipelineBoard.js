@@ -1,7 +1,44 @@
 // Live pipeline board: five agent cards fed by the durable event stream.
 import { useState } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Clock, Wrench, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
-import { AGENT_META, AGENT_ORDER } from './constants';
+import { AGENT_META, AGENT_ORDER, formatDollars } from './constants';
+
+// Pure display formatters for tool-call I/O. The backend records tool output
+// as structured objects (policyLookup → {found, data}, claimHistory →
+// {count, claims}); React cannot render objects as children, so every value
+// crossing into JSX goes through here and returns a string (or null to render
+// nothing). The {found, data} shape is the backend contract — format it, never
+// flatten it upstream.
+export function formatPolicyLookupOutput(output) {
+  if (output == null || typeof output !== 'object') return output == null ? '' : String(output);
+  if (output.found !== true) return 'Not found — no policy record matched this lookup';
+  const data = output.data || {};
+  const bits = [];
+  if (data.policy_number) bits.push(`Policy ${data.policy_number}`);
+  if (data.holder_name) bits.push(data.holder_name);
+  if (data.coverage_limit != null) bits.push(`coverage ${formatDollars(data.coverage_limit)}`);
+  return bits.length > 0 ? bits.join(' · ') : 'Policy record found';
+}
+
+export function formatClaimHistoryOutput(output) {
+  if (output == null || typeof output !== 'object') return output == null ? '' : String(output);
+  if (typeof output.count !== 'number') return JSON.stringify(output);
+  return output.count === 0
+    ? 'No prior claims in the last 12 months'
+    : `${output.count} prior claim${output.count === 1 ? '' : 's'} in the last 12 months`;
+}
+
+// One tool call → the arrow-suffix string on the trace line. Known tools get a
+// human summary; any other object falls back to JSON so a new backend tool can
+// never crash the board with an object-shaped output.
+export function formatToolOutput(tool) {
+  const output = tool?.output;
+  if (output == null) return null;
+  if (typeof output !== 'object') return String(output);
+  if (tool.tool === 'policyLookup') return formatPolicyLookupOutput(output);
+  if (tool.tool === 'claimHistory') return formatClaimHistoryOutput(output);
+  return JSON.stringify(output);
+}
 
 const CONNECTION_META = {
   connecting: { label: 'CONNECTING', color: 'text-[#f59e0b]', dot: 'bg-[#f59e0b]' },
@@ -131,7 +168,7 @@ function AgentCard({ agentName, status, output, toolsCalled, duration, isLast })
                     <span className="text-[#7dd3fc]">{tool.tool}</span>
                     <span className="text-[#4a5568]">(&quot;{tool.input}&quot;)</span>
                     {tool.duration_ms != null && <span className="text-[#10b981]">✓ {tool.duration_ms}ms</span>}
-                    {tool.output != null && <span className="text-[#4a5568]">→ {tool.output}</span>}
+                    {tool.output != null && <span className="text-[#4a5568]">→ {formatToolOutput(tool)}</span>}
                   </div>
                 ))}
               </div>
