@@ -39,7 +39,14 @@ RUN set -eux; \
 # ---- Stage 2: nginx serving the SPA + proxying api/SSE -------------------
 FROM nginx:alpine
 
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# API_UPSTREAM is host:port of the FastAPI api service. The nginx image's
+# envsubst template mechanism substitutes it from the environment at container
+# start (only defined env vars are replaced; nginx runtime variables are left
+# intact). Compose keeps the compose service name; Railway overrides it to the
+# private-network host (api.railway.internal:8000) via a service variable.
+ENV API_UPSTREAM=api:8000
+
+COPY nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY --from=builder /app/build /usr/share/nginx/html
 
 EXPOSE 80
