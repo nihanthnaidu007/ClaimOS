@@ -147,6 +147,7 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 | `min_age_hours` / `max_age_hours` | *(none)* | on enriched SLA hours |
 | `sort` | `age` | `age` \| `severity` \| `risk` \| `created_at` (alias of `age`) |
 | `direction` | `asc` | `asc` = most-urgent-first for every key |
+| `search` | *(none)* | case-insensitive: claim **number by prefix**, policy **number by substring**, customer **name by substring** — one hit on any field matches (spec F8); composes with the filters above, honors the same cap, and also applies to `/stream` |
 
 **`GET /api/workbench/stream`** — SSE over the same filtered queue. The stream re-reads the durable store on an interval and emits a `queue_update` frame (`{"event": "queue_update", "rows": …, "generatedAt": …}`) only when the rendered digest changes, with `: keep-alive` comments between. Same query parameters as `/queue`.
 
