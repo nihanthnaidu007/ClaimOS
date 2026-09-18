@@ -18,6 +18,7 @@ import server
 from app.config import settings
 from app.workbench import (
     build_case_summary,
+    matches_search,
     parse_sla_hours,
     queue_row,
     severity_for_claim,
@@ -328,6 +329,151 @@ def test_queue_status_filter_param(client, adjuster_headers):
         params={"status": "auto_approved"},
     ).json()["rows"]
     assert [row["id"] for row in rows] == ["CLM-DECIDED"]
+
+
+# ============ Queue search (spec F8: AC-8.1, AC-8.2) ============
+
+
+def _seed_search_claims():
+    """Two reviewable claims with disjoint numbers, policies, and holders."""
+    _insert_claim(id="CLM-TEST-001")  # policy AUTO-2024-001847, holder Sarah Chen
+    _insert_claim(
+        id="CLM-OTHER-9",
+        policy_number="AUTO-2023-555111",
+        holder_name="Ada Lovelace",
+    )
+
+
+def test_matches_search_claim_number_is_prefix_only():
+    row = {"id": "CLM-TEST-001", "policy_number": "AUTO-2024-001847", "holder_name": "Sarah Chen"}
+    assert matches_search(row, "CLM-TEST") is True
+    assert matches_search(row, "clm-te") is True  # case-insensitive prefix
+    # Neither policy nor name contains these, and they are not claim prefixes.
+    assert matches_search(row, "TEST-001") is False
+    assert matches_search(row, "lm-test") is False
+
+
+def test_matches_search_policy_and_name_are_substrings():
+    row = {"id": "CLM-TEST-001", "policy_number": "AUTO-2024-001847", "holder_name": "Sarah Chen"}
+    # Substring in the middle of the policy number, any case.
+    assert matches_search(row, "01847") is True
+    assert matches_search(row, "auto-2024") is True
+    assert matches_search(row, "CHEN") is True
+    assert matches_search(row, "rah C") is True
+    assert matches_search(row, "grace") is False
+
+
+def test_queue_search_by_claim_number_prefix(client, adjuster_headers):
+    _seed_search_claims()
+    headers = adjuster_headers(client)
+    rows = client.get(
+        "/api/workbench/queue", headers=headers, params={"search": "clm-test"}
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-TEST-001"]
+
+
+def test_queue_search_by_policy_number_substring(client, adjuster_headers):
+    _seed_search_claims()
+    headers = adjuster_headers(client)
+    rows = client.get(
+        "/api/workbench/queue", headers=headers, params={"search": "555111"}
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-OTHER-9"]
+    # Case-insensitive and matches a mid-policy segment.
+    rows = client.get(
+        "/api/workbench/queue", headers=headers, params={"search": "AUTO-2023"}
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-OTHER-9"]
+
+
+def test_queue_search_by_customer_name_substring(client, adjuster_headers):
+    _seed_search_claims()
+    headers = adjuster_headers(client)
+    rows = client.get(
+        "/api/workbench/queue", headers=headers, params={"search": "chen"}
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-TEST-001"]
+    rows = client.get(
+        "/api/workbench/queue", headers=headers, params={"search": "ADA LOVELACE"}
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-OTHER-9"]
+
+
+def test_queue_search_blank_query_is_a_noop(client, adjuster_headers):
+    _seed_search_claims()
+    headers = adjuster_headers(client)
+    for blank in ("", "   "):
+        rows = client.get(
+            "/api/workbench/queue", headers=headers, params={"search": blank}
+        ).json()["rows"]
+        assert sorted(row["id"] for row in rows) == ["CLM-OTHER-9", "CLM-TEST-001"]
+
+
+def test_queue_search_with_no_matches_returns_empty_list(client, adjuster_headers):
+    _seed_search_claims()
+    rows = client.get(
+        "/api/workbench/queue", headers=adjuster_headers(client), params={"search": "zzz-nothing"}
+    ).json()["rows"]
+    assert rows == []
+
+
+def test_queue_search_composes_with_filters_and_sort(client, adjuster_headers, monkeypatch):
+    monkeypatch.setattr(settings, "sla_hours_per_severity", "low:72,elevated:24")
+    now = datetime.now(timezone.utc)
+    _insert_claim(id="CLM-TEST-001", created_at=now.isoformat())  # low, fresh
+    _insert_claim(
+        id="CLM-TEST-003",
+        created_at=(now - timedelta(hours=50)).isoformat(),
+        claimed_amount=25000.0,  # elevated by amount, old
+    )
+    _insert_claim(
+        id="CLM-OTHER-9",
+        policy_number="AUTO-2023-555111",
+        holder_name="Ada Lovelace",
+        created_at=(now - timedelta(hours=80)).isoformat(),
+        claimed_amount=25000.0,  # elevated, oldest — outside the search scope
+    )
+    headers = adjuster_headers(client)
+
+    # Search + severity filter: only the elevated CLM-TEST claim survives.
+    rows = client.get(
+        "/api/workbench/queue", headers=headers,
+        params={"search": "CLM-TEST", "severity": "elevated"},
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-TEST-003"]
+
+    # Search + age filter: the 50h-old claim, not the fresh one.
+    rows = client.get(
+        "/api/workbench/queue", headers=headers,
+        params={"search": "CLM-TEST", "min_age_hours": 40},
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-TEST-003"]
+
+    # Search + severity sort keeps the current sort contract.
+    rows = client.get(
+        "/api/workbench/queue", headers=headers,
+        params={"search": "CLM-TEST", "sort": "severity"},
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-TEST-003", "CLM-TEST-001"]
+
+    # Search hits every field at once: "2023" only in the OTHER policy number.
+    rows = client.get(
+        "/api/workbench/queue", headers=headers,
+        params={"search": "2023", "severity": "elevated", "sort": "risk"},
+    ).json()["rows"]
+    assert [row["id"] for row in rows] == ["CLM-OTHER-9"]
+
+
+def test_queue_search_does_not_widen_customer_access(client, make_authenticated_user):
+    """AC-8.2: search cannot reach the workbench with a customer token."""
+    _seed_search_claims()
+    token = _login_token(client, "customer")
+    response = client.get(
+        "/api/workbench/queue",
+        headers={"Authorization": f"Bearer {token}"},
+        params={"search": "CLM-TEST-001"},
+    )
+    assert response.status_code == 403
 
 
 # ============ Case summary + events endpoints ============
