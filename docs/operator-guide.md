@@ -63,7 +63,7 @@ Copy `backend/.env.example` to `backend/.env`; never commit `.env`. The typed so
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | *(empty)* | Credential for the five-agent pipeline. Optional at boot; the first real LLM call fails closed without it. |
+| `ANTHROPIC_API_KEY` | *(empty)* | Credential for the six-agent pipeline. Optional at boot; the first real LLM call fails closed without it. |
 | `LLM_PROVIDER` | `anthropic` | Adapter in use. |
 | `LLM_MODEL` | `claude-sonnet-4-20250514` | Model for agent calls. |
 | `LLM_TIMEOUT_S` | `60` | Per-request LLM timeout in seconds (read by the adapter). |

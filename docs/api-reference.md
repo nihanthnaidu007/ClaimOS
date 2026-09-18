@@ -37,7 +37,7 @@ curl -s http://localhost:8000/api/claims \
 
 ## Auth (public)
 
-**`POST /api/auth/register`** → `201` `PublicUser` `{id, email, role, createdAt}`. Request: `{email, password (8–128 chars), role ("adjuster" | "customer"), inviteCode}`. Invite-only: an unset `INVITE_CODE` disables registration (`403` "Registration is disabled"); a wrong code is `403` "Invalid invite code" (constant-time comparison); a duplicate email is `409`.
+**`POST /api/auth/register`** → `201` `PublicUser` `{id, email, role, createdAt}`. Request: `{email, password (8–128 chars), inviteCode}`. Registration is customer-only — the server assigns the role, and adjuster accounts are the seeded demo credentials (`DEMO_ADJUSTER_EMAIL`/`DEMO_ADJUSTER_PASSWORD`). Invite-only: an unset `INVITE_CODE` disables registration (`403` "Registration is disabled"); a wrong code is `403` "Invalid invite code" (constant-time comparison); a duplicate email is `409`.
 
 **`POST /api/auth/login`** → `200` `{"accessToken", "tokenType": "bearer", "expiresInSeconds", "user": {id, email, role, createdAt}}`. Request: `{email, password}`. Sets the httpOnly refresh cookie (path `/api/auth`) and the CSRF cookie (path `/`). Unknown email and wrong password return the same `401` "Invalid email or password" — no enumeration. Rate-limited `5/minute` per IP.
 
@@ -82,7 +82,7 @@ data: {"event": "agent_complete", "agent": "policy", "label": "…", "duration":
 - **Replay:** send `Last-Event-ID: <seq>` (or the header a browser sets automatically on `EventSource` reconnect) and the stream resumes exactly after that sequence number. A non-integer header is `400`.
 - **Heartbeat:** a `: heartbeat` comment every 15 seconds of silence.
 - **Terminates** after a terminal event (`pipeline_complete`, `pipeline_halted`, `claim_failed`).
-- **Event payloads:** `agent_start` `{agent, label, description, timestamp}`, `agent_complete` `{agent, label, duration, output, toolsCalled}`, `pipeline_halted` `{reason, …}`, `agent_error`, plus lifecycle events emitted by routes and the worker: `claim_submitted`, `document_uploaded` `{documentId, fileName, contentType, sizeBytes, uploadedBy}`, `claim_overridden` `{decision, payoutAmount, actor, reason, at}`, `settlement_recorded` `{amount, method, reference, recordedBy}`.
+- **Event payloads:** `agent_start` `{agent, label, description, timestamp}`, `agent_complete` `{agent, label, duration, output, toolsCalled}`, `pipeline_halted` `{reason, …}`, `agent_error`, plus lifecycle events emitted by routes and the worker: `claim_submitted`, `document_uploaded` `{documentId, fileName, contentType, sizeBytes, uploadedBy}`, `claim_overridden` `{decision, payoutAmount, actor, reason, at}`, `payout_recorded` `{amount, method, reference, recordedBy}`.
 
 **`GET /api/claims/stream/{claim_id}`** — compatibility alias serving the same durable stream.
 
