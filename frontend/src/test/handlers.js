@@ -194,6 +194,23 @@ export const handlers = [
     });
   }),
 
+  // Portal document uploads (spec F4): the default is a 201 receipt; tests
+  // override with server.use(...) to script validation failures.
+  http.post(`${API_BASE}/status/upload-document`, async ({ request }) => {
+    const form = await request.formData();
+    const file = form.get('file');
+    return HttpResponse.json(
+      {
+        requestId: form.get('requestId') || 'dreq_portal01',
+        status: 'received',
+        documentId: 'doc_new_1',
+        filename: file ? file.name : 'estimate.pdf',
+        sizeBytes: file ? file.size : 0,
+      },
+      { status: 201 }
+    );
+  }),
+
   // FNOL wizard: no server draft by default (404 = local copy is truth);
   // PUT echoes the upsert the useWizardDraft autosave performs.
   http.get(`${API_BASE}/fnol/drafts/:draftId`, () => new HttpResponse(null, { status: 404 })),
