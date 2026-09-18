@@ -183,7 +183,6 @@ export function usePipelineEvents({
     // invalidateOnReconnect and onEvent are read through refs (callers pass
     // fresh array/function literals each render); re-keying the effect on
     // them would abort the live stream on every re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [claimId, enabled, queryClient]);
 
   return { connectionState };
