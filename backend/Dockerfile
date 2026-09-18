@@ -30,6 +30,12 @@ COPY --chown=appuser:appuser . /app/
 RUN groupadd --gid 10001 appuser && \
     useradd --uid 10001 --gid appuser --create-home appuser
 
+# Compose mounts the named volume "uploads" at /data/uploads. A fresh named
+# volume is initialized with the image directory's ownership, so without this
+# mkdir+chown the mount point lands root-owned and appuser (uid 10001) cannot
+# write uploads there -> LocalFsProvider.save raises PermissionError -> 500.
+RUN mkdir -p /data/uploads && chown -R appuser:appuser /data/uploads
+
 USER appuser
 
 EXPOSE 8000
