@@ -72,8 +72,12 @@ class AccessCodeRecoveryResponse(BaseModel):
     message: str = _RECOVERY_NEUTRAL_MESSAGE
 
 
-async def _claim_for_access(claim_number: str, access_code: str) -> dict:
-    """The one claim matching claim number AND access-code hash, else generic 404."""
+async def claim_for_access(claim_number: str, access_code: str) -> dict:
+    """The one claim matching claim number AND access-code hash, else generic 404.
+
+    Also the credential check for the F4 portal upload (app.portal_uploads) —
+    one lookup, one generic miss, everywhere the code authenticates a claim.
+    """
     claim = await database.claims_col.find_one(
         {"id": claim_number, "access_code_hash": access_code_hash(access_code)},
         {"_id": 0},
@@ -95,20 +99,27 @@ async def _claim_for_access(claim_number: str, access_code: str) -> dict:
 )
 @limiter.limit(settings.status_lookup_rate_limit)
 async def lookup_claim_status(request: Request, payload: StatusLookupRequest):
-    claim = await _claim_for_access(payload.claimNumber, payload.accessCode)
+    claim = await claim_for_access(payload.claimNumber, payload.accessCode)
     events = (
         await database.events_col.find({"claim_id": claim["id"]}, {"_id": 0})
         .sort("seq", 1)
         .to_list(1000)
     )
+    # F4 document checklist: the ask and its lifecycle state are the
+    # customer's own to-do list; the projection strips adjuster-only fields.
+    document_requests = (
+        await database.document_requests_col.find({"claim_id": claim["id"]}, {"_id": 0})
+        .sort("created_at", 1)
+        .to_list(200)
+    )
     logger.info("status_lookup", claim_id=claim["id"])
-    return public_status_payload(claim, events)
+    return public_status_payload(claim, events, document_requests)
 
 
 @router.post("/decision-letter", response_model=StatusLetterResponse)
 @limiter.limit(settings.status_lookup_rate_limit)
 async def download_decision_letter(request: Request, payload: StatusLetterRequest):
-    claim = await _claim_for_access(payload.claimNumber, payload.accessCode)
+    claim = await claim_for_access(payload.claimNumber, payload.accessCode)
     decision = (claim.get("agent_trace") or {}).get("decision") or {}
     if not decision:
         # No decision yet — same generic 404 (there is nothing to reveal).
