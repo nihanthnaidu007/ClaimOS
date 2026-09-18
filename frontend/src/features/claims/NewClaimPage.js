@@ -55,7 +55,15 @@ export default function NewClaimPage() {
     invalidateOnReconnect: ['claims'],
   });
 
-  const claimQuery = useClaim(claimId);
+  const claimQuery = useClaim(claimId, {
+    // Streaming-independent fallback: if the SSE transport dies (proxy hiccup,
+    // HMR remount, network flap), a slow poll still delivers the terminal
+    // status so the decision panel renders. Terminal data stops the polling.
+    refetchInterval: (query) =>
+      query.state.data && TERMINAL_STATUSES.includes(query.state.data.status)
+        ? false
+        : 10_000,
+  });
   const record = claimQuery.data;
 
   const pipeline = pipelineQuery.data || INITIAL_PIPELINE_STATE;

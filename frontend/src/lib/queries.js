@@ -30,11 +30,12 @@ export function useClaims() {
   });
 }
 
-export function useClaim(claimId) {
+export function useClaim(claimId, options = {}) {
   return useQuery({
     queryKey: queryKeys.claim(claimId),
     queryFn: () => api.get(`/claims/${claimId}`).then((r) => r.data),
     enabled: Boolean(claimId),
+    ...options,
   });
 }
 
