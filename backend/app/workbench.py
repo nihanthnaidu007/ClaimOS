@@ -147,7 +147,7 @@ QUEUE_ROW_FIELDS = (
     "failure_reason",
     "fraud_flags",
     "flags",
-    "assignee_id",
+    "assignee_id",  # spec F10: backs the Mine/Unassigned/All chips
 )
 
 # Seeded or legacy claim docs may be missing fields the row renders; coerce
@@ -158,6 +158,8 @@ _STRING_FIELDS = frozenset(
 )
 _NUMBER_FIELDS = frozenset({"claimed_amount", "risk_score"})
 _LIST_FIELDS = frozenset({"fraud_flags", "flags"})
+# None is meaningful here (unassigned), so it must pass through un-coerced.
+_NULLABLE_FIELDS = frozenset({"assignee_id"})
 
 
 # ============ Saved views (spec F12) ============
@@ -206,7 +208,7 @@ def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
     row = {"id": ""}
     for field in QUEUE_ROW_FIELDS:
         value = claim.get(field)
-        if value is None:
+        if value is None and field not in _NULLABLE_FIELDS:
             value = 0.0 if field in _NUMBER_FIELDS else [] if field in _LIST_FIELDS else ""
         row[field] = value
     row["severity"] = severity

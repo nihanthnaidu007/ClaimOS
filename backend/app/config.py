@@ -175,6 +175,11 @@ class Settings(BaseSettings):
     # Fraction of the SLA target past which a queue row shows at-risk (amber);
     # past 100% it is breached (red).
     sla_at_risk_fraction: float = 0.75
+    # Claim assignment (spec F10). "round_robin" assigns every new claim to the
+    # active adjuster with the oldest last-assignment time; "none" leaves claims
+    # unassigned. Typed Literal, so a typo'd env value fails boot loudly instead
+    # of silently disabling assignment.
+    auto_assign: Literal["round_robin", "none"] = "round_robin"
     # Workbench SSE stream: seconds between queue re-reads on an open stream.
     workbench_stream_interval_seconds: float = 2.0
 
