@@ -6,7 +6,12 @@ import { defineConfig } from '@playwright/test';
 // processes; the service contract (ports, proxying, env) matches compose.
 export default defineConfig({
   testDir: './e2e',
-  timeout: 240_000, // submission runs the real 5-agent pipeline
+  // The submission test rides the REAL pipeline: main's tuned prompts miss
+  // the typed schemas on the first pass often enough that stages burn 2-3
+  // LLM round-trips (the adapter's bounded schema retry rescues them), so a
+  // full run can legitimately take 5+ minutes. 540s > the 480s decision
+  // wait inside the test.
+  timeout: 540_000,
   expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,

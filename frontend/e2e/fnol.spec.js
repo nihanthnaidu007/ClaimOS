@@ -100,7 +100,11 @@ test('submission runs the live pipeline to a persisted decision', async ({ page 
   await expect(page.getByTestId('connection-chip')).toBeVisible();
 
   // Real agents run to completion; the persisted decision replaces the board.
-  await expect(page.getByTestId('decision-panel')).toBeVisible({ timeout: 300_000 });
+  // Live latency: main's tuned prompts miss the typed schemas on the first
+  // pass often enough that stages burn 2-3 LLM round-trips (the adapter's
+  // bounded schema retry rescues them — see adapter.py), so a full run can
+  // legitimately take 5+ minutes. 480s covers it without masking hangs.
+  await expect(page.getByTestId('decision-panel')).toBeVisible({ timeout: 480_000 });
   // The pipeline must reach a REAL decision — the failure banner renders the
   // same panel with a "PROCESSING FAILED" verdict and would satisfy the
   // visibility assertion above.
