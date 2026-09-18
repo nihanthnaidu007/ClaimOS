@@ -26,6 +26,9 @@ refresh_tokens_col = db.refresh_tokens
 # insert; there is no update or delete path in the application.
 audit_log_col = db.audit_log
 notifications_col = db.notifications
+# Document checklists (spec F3): claim-scoped asks with an independent
+# lifecycle — requested → received (F4 upload) or waived.
+document_requests_col = db.document_requests
 
 SEED_MARKER_ID = "seed:v1"
 
@@ -224,6 +227,8 @@ async def seed_database():
     await claims_col.create_index("id", unique=True)
     await claims_col.create_index("policy_number")
     await claim_documents_col.create_index("claim_id")
+    # document_requests: the case-view checklist queries per claim, oldest first.
+    await document_requests_col.create_index("claim_id")
     # audit_log: append-only rows are queried per claim (case view) and by time.
     await audit_log_col.create_index("claim_id")
     await audit_log_col.create_index("at")

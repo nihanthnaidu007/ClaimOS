@@ -26,6 +26,7 @@ import {
   slaPresentation,
   statusClassName,
 } from '@/lib/workbench';
+import DocumentRequests from './DocumentRequests';
 import OverrideModal from './OverrideModal';
 
 const STAGE_ORDER = ['intake', 'policy', 'documents', 'fraud', 'eligibility', 'decision'];
@@ -541,6 +542,8 @@ export default function CaseView() {
       <DecisionLetter claimId={summary.claimId} hasLetter={summary.decision?.hasLetterBody} />
 
       <DocumentUploads claimId={summary.claimId} />
+
+      <DocumentRequests claimId={summary.claimId} />
 
       <AuditTrail entries={audit} />
 

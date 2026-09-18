@@ -132,7 +132,7 @@ docker compose exec mongo mongodump --db claimos --archive > claimos.archive
 docker compose exec -T mongo mongorestore --archive < claimos.archive
 ```
 
-Verify a restore before calling it done: either a `mongosh` count on `claims`, or an authenticated `GET /api/claims` with an adjuster token comparing claim counts.
+Verify a restore before calling it done: either a `mongosh` count on `claims` (and on `document_requests` — the adjuster checklist collection added with the document-requests feature, whose entries point at claims via `claim_id`), or an authenticated `GET /api/claims` with an adjuster token comparing claim counts.
 
 ## Failure triage basics
 

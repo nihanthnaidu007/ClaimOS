@@ -102,6 +102,14 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 
 **`GET /api/claims/{claim_id}/documents`** → `200` `UploadedDocumentResponse[]` — this claim's uploads, newest first, capped at 100.
 
+## Document requests (adjuster)
+
+**`POST /api/claims/{claim_id}/document-requests`** — add an entry to the claim's document checklist ("documents we need" from the claimant). Request: `{title (required, 1–120 chars), description (optional, ≤2000 chars)}` — the description tells the claimant what a good upload looks like. → `201` `DocumentRequestRecord` with `status: "requested"`. Every create is audited (`document_request_created`) and announced on the claim's event log. Errors: `404` unknown claim; `422` validation.
+
+**`GET /api/claims/{claim_id}/document-requests`** → `200` `DocumentRequestRecord[]` — this claim's checklist, oldest first.
+
+**`PATCH /api/claims/{claim_id}/document-requests/{request_id}`** — edit wording or waive. Body: `{title?, description?}` (edit) or `{waive: true, reason?}` (close without an upload; the reason lands in the audit trail when given). Editing is refused once the request is no longer `requested` (`409`), and only `requested` items can be waived (`409`) — receiving (F4) or waiving is terminal. Successful mutations are audited (`document_request_updated` / `document_request_waived`) and land on the event log. Errors: `404` unknown claim or request; `409` state conflict; `422` validation. Customer tokens are refused on every document-request route (`403`).
+
 ## Evidence pack (adjuster)
 
 **`GET /api/claims/{claim_id}/evidence-pack`** → `200` `{"claimId", "filename": "evidence-pack-<claim_id>.pdf", "pdf": "<base64 PDF>"}` — the full adjudication record: traces, decision, and the claim's event history. Errors: `404`.
@@ -205,3 +213,5 @@ Scoped to the caller's own email — the fan-out stamps `recipient_email` (the c
 `WorkbenchQueueRow`: `id, policy_number, holder_name, incident_type, claimed_amount, status, risk_score, created_at, severity ("low" | "elevated"), sla {targetHours, hoursElapsed, hoursRemaining, breached, state ("ok" | "at_risk" | "breached")}, escalation_reason, failure_reason, fraud_flags[]`.
 
 `AuditEntry`: `id, claim_id, actor, actor_email, action, before, after, reason, at`.
+
+`DocumentRequestRecord`: `id, claim_id, title, description, status ("requested" | "received" | "waived"), requested_by, document_id, created_at, updated_at`.

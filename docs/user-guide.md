@@ -46,6 +46,8 @@ The claim also shows its processing runs: each attempt, when it started and fini
 
 **Documents and evidence.** Adjusters can attach files to a claim — PDF, PNG, or JPEG, up to 10 MiB each. Every upload is hashed (SHA-256), listed on the claim with who uploaded it and when, and announced on the claim's event log, so anyone reading the timeline sees the evidence arrive. Re-uploading identical content does not create duplicates.
 
+**Document requests.** For documents you need *from the claimant*, open the case and use the "Documents we need" checklist. Request a document by name ("Repair estimate") with an optional note describing what a good upload looks like ("Signed, itemized, on shop letterhead") — the note is what the claimant will read, so make it concrete. Each request shows a status chip: Requested (waiting on the claimant), Received, or Waived. Only requested items can be changed: edit the wording, or waive it — with a reason for the audit log — when the outcome no longer needs it; once received or waived, a request is settled history. Titles are capped at 120 characters and descriptions at 2,000, validation happens as you leave the field, and every create, edit, and waive is written to the audit trail with your name on it.
+
 **Evidence pack.** Every claim with a decision has a downloadable PDF: the verdict box, the payout, the risk factors, and the letter body, with the reasoning trace and the claim's event history. It is the artifact you hand to a reviewer, a manager, or the customer.
 
 **Claim history.** Every claim in the system, newest first, filterable. Auto-finalized claims live here too — the workbench queue shows only what needs a human.

@@ -27,6 +27,7 @@ from app.deps import (
     require_authenticated,
     verify_csrf,
 )
+from app.document_requests import router as document_requests_router
 from app.events import emit_event, tail_claim_events
 from app.fnol_drafts import router as fnol_drafts_router
 from app.logging_setup import configure_logging
@@ -591,6 +592,7 @@ api_router.include_router(workbench_router)  # adjuster-gated workbench under /a
 api_router.include_router(status_router)  # /status/* public portal endpoints
 api_router.include_router(notify_router)  # /notifications/* authenticated
 api_router.include_router(claims_router)  # trace, documents, evidence pack
+api_router.include_router(document_requests_router)  # adjuster document checklists (spec F3)
 api_router.include_router(fnol_drafts_router)  # resumable FNOL drafts
 app.include_router(api_router)
 
