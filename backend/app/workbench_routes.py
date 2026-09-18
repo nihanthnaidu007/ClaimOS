@@ -36,6 +36,7 @@ from app.workbench import (
     REVIEWABLE_STATUSES,
     DECIDED_STATUSES,
     build_case_summary,
+    matches_search,
     queue_row,
 )
 
@@ -69,6 +70,7 @@ class QueueParams:
         max_age_hours: float | None = None,
         sort: str = "age",
         direction: str = "asc",
+        search: str = "",
     ):
         self.statuses = [s.strip() for s in status.split(",") if s.strip()] or list(
             QUEUE_DEFAULT_STATUSES
@@ -76,6 +78,7 @@ class QueueParams:
         self.severities = [s.strip().lower() for s in severity.split(",") if s.strip()]
         self.min_age_hours = min_age_hours
         self.max_age_hours = max_age_hours
+        self.search = search.strip()
         if sort not in _SORT_KEYS:
             raise HTTPException(status_code=400, detail=f"sort must be one of {sorted(_SORT_KEYS)}")
         if sort == "created_at":  # alias: age and created_at order the same way
@@ -118,12 +121,20 @@ def _sort_rows(rows: list[dict], params: QueueParams) -> list[dict]:
     return rows
 
 
+def _apply_search_filter(rows: list[dict], params: QueueParams) -> list[dict]:
+    """Search narrows the enriched rows (spec F8); a blank query is a no-op."""
+    if not params.search:
+        return rows
+    return [row for row in rows if matches_search(row, params.search)]
+
+
 async def load_queue_rows(params: QueueParams) -> list[dict]:
     """Fetch the status-filtered claims and enrich each with severity + SLA."""
     claims = await database.claims_col.find(
         {"status": {"$in": params.statuses}}, {"_id": 0}
     ).to_list(500)
     rows = _apply_row_filters([queue_row(claim) for claim in claims], params)
+    rows = _apply_search_filter(rows, params)
     return _sort_rows(rows, params)
 
 

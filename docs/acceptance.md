@@ -31,10 +31,20 @@ The fixture adapter (`backend/app/llm/fixture.py`, `LLM_PROVIDER=fixture`) makes
 | AC-12 | Deployment live and observable (Railway + Atlas M0) | **GAP — requires deployed environment.** Not verifiable from CI/sandbox: needs Railway service deploy + Atlas M0 credentials, then the checklist (`/health` 200, `/ready` database ok, request-ID logs, mongodump job). **Owner: repository owner** (deployment credentials are user-scoped secrets; the compose stack in `e2e-compose` verifies the same readiness contract in CI) | checklist (pending) |
 | AC-13 | Dogfood evidence per UI PR | `obvious autobuild upload` per acceptance criterion with a UI surface, captured at the tested head SHA (viewport 1440×900, before/after where visual); CI failures upload Playwright traces/reports as artifacts | QA uploads |
 
+## Feature Waves coverage (spec `art_442ZCjeO`)
+
+Wave-by-wave acceptance criteria from the Feature Waves spec, proven on this branch:
+
+| AC | Criterion | Proven by |
+|---|---|---|
+| F8 / AC-8.1 | Queue search: claim-number **prefix**, policy-number **substring**, customer-name **substring**, case-insensitive, composable with the status/severity/age filters and the current sort, within the existing 500-row fetch cap | `backend/tests/test_workbench.py` — pure `matches_search` semantics tests plus endpoint tests for each field, blank-query no-op, no-match empty list, and search combined with severity/age filters and severity sort (`test_queue_search_composes_with_filters_and_sort`) |
+| F8 / AC-8.2 | Search does not widen access: a customer token cannot reach the workbench queue with `search` | `backend/tests/test_workbench.py::test_queue_search_does_not_widen_customer_access` (403) plus the adjuster-gate tests on every workbench route |
+| F8 / AC-8.3 | Search box: debounced input, skeleton loading rows, "no matches" empty state with a working clear action | `frontend/src/components/workbench/WorkbenchQueue.test.jsx` — debounce param wiring, clearing drops the param, row-shaped skeletons while loading, no-matches state + clear action |
+
 ## Suite inventory (this branch)
 
-- **Backend (pytest):** 336 tests green (includes `test_llm_fixture.py`, 22 tests, added this wave for the deterministic adapter + fault semantics, and a login regression test for the pyjwt≥2.13 empty-secret `InvalidKeyError` caught by the first compose run).
-- **Frontend (Vitest/RTL):** 119 tests green in 17 files (`frontend-test` in CI runs the same suite with coverage).
+- **Backend (pytest):** 345 tests green (includes `test_llm_fixture.py`, 22 tests, added this wave for the deterministic adapter + fault semantics, and a login regression test for the pyjwt≥2.13 empty-secret `InvalidKeyError` caught by the first compose run; F8 adds 11 queue-search tests).
+- **Frontend (Vitest/RTL):** 123 tests green in 17 files (`frontend-test` in CI runs the same suite with coverage; F8 adds 4 search-state tests).
 - **Playwright E2E (8 spec files, 17 tests, fixture mode):** fnol (3), validation (3), status-portal (3), stp-approval (2), override (2), sse-fallback (1), agent-failure (2, fault-gated: `FIXTURE_FAULT=timeout:intake`), refusal-fallback (1, fault-gated: `FIXTURE_FAULT=refusal:decision`). Serial mode, one worker. Local proof 2026-09-18: 14/14 runnable tests passed on a fresh DB (`claimos_e2e_0918f`) with CI-equivalent rate limits (`LOGIN_RATE_LIMIT=30/minute`, `STATUS_LOOKUP_RATE_LIMIT=10/minute`); the three fault-gated tests passed on dedicated fault-injected stacks (`timeout:intake`, `refusal:decision`) and run in CI's compose job, which recreates the worker per fault phase.
 - **Claim-history slate (why specs use different policies):** the eligibility stage adds +25 risk once a policy carries 3+ claims in 12 months — counting the claim under evaluation. The suite submits ~7 pipeline claims, so specs spread across the three seeded AUTO policies (assignment map in `frontend/e2e/utils.js`) to keep every approval-asserting scenario under the flag in both local and CI-alphabetical run orders. Incident dates stay distinct per spec because duplicate fingerprints are (policy, date, type).
 
