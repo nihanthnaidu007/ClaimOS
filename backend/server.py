@@ -470,10 +470,14 @@ async def record_claim_settlement(
     )
     await audit_log_col.insert_one(audit.model_dump().copy())
 
+    # Customer-facing milestone name wins: the status portal's fourth milestone
+    # and the notification fan-out both key on `payout_recorded`
+    # (app/status_portal.py, app/notifications/fanout.py) — the old
+    # settlement_recorded name had no consumer anywhere.
     await emit_event(
         claim_id,
         {
-            "event": "settlement_recorded",
+            "event": "payout_recorded",
             "amount": record["amount"],
             "method": record["method"],
             "reference": record["reference"],

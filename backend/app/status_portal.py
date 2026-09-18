@@ -26,6 +26,7 @@ _STAGE_LABELS = {
     "INTAKE_AGENT": "Intake & Validation",
     "POLICY_AGENT": "Policy Verification",
     "DOCUMENT_AGENT": "Document Analysis",
+    "FRAUD_AGENT": "Fraud Cross-Check",
     "ELIGIBILITY_AGENT": "Eligibility & Risk",
     "DECISION_AGENT": "Decision & Communication",
 }
