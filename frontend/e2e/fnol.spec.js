@@ -128,9 +128,12 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   // The persisted claim state is terminal — no pending pill.
   await expect(page.getByTestId('claim-status-pill')).not.toContainText(/pending/i);
 
-  // Upload a supporting PDF on the claim detail surface. Both network legs
-  // are observed so a failure names the offending response (upload POST
-  // status, refetch GET status) instead of a silent 30s locator timeout.
+  // Upload a supporting PDF on the claim detail surface. The POST is observed
+  // at request level and the 201 is asserted through the persisted row: the
+  // client refetches only on a 2xx upload, so row count +1 IS the accepted
+  // outcome. (CI observed nginx answer 201 while the browser's POST response
+  // was lost to a transient socket reset — a response-level wait starves on
+  // that, a request-level wait plus the persisted row does not.)
   const rowsBefore = await page.getByTestId('document-row').count();
   const refetchGet = page.waitForResponse(
     (r) => r.url().includes('/documents') && r.request().method() === 'GET',
@@ -142,16 +145,15 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
       mimeType: 'application/pdf',
       buffer: tinyPdf('detail-repair-estimate'),
     });
-  const uploadPost = await page.waitForResponse(
-    (r) => r.url().includes('/documents') && r.request().method() === 'POST',
+  await page.waitForRequest(
+    (r) => r.url().includes('/documents') && r.method() === 'POST',
     { timeout: 30_000 }
   );
-  expect(uploadPost.status(), 'upload POST must return 201').toBe(201);
-  const refetch = await refetchGet;
-  expect(refetch.status(), 'documents refetch must return 200').toBe(200);
   await expect(page.getByTestId('document-row')).toHaveCount(rowsBefore + 1, {
     timeout: 30_000,
   });
+  const refetch = await refetchGet;
+  expect(refetch.status(), 'documents refetch must return 200').toBe(200);
 
   // Evidence pack: the API returns a JSON envelope whose base64 payload
   // decodes to a real PDF (the client turns it into a Blob download).
