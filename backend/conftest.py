@@ -42,6 +42,7 @@ def patched_mongo(monkeypatch):
         "refresh_tokens_col",
         "audit_log_col",
         "notifications_col",
+        "document_requests_col",
     ):
         monkeypatch.setattr(database, attr, db[attr.removesuffix("_col")])
     monkeypatch.setattr(database, "db", db)
