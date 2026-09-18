@@ -70,7 +70,12 @@ AGENT_PARAMS: dict[str, dict] = {
     # Fraud similarity: one focused judgment over duplicate-fingerprint
     # candidates; small output (verdict, confidence, cited evidence).
     "fraud": {"temperature": 0.1, "max_tokens": 2048},
-    "eligibility": {"temperature": 0.1, "max_tokens": 2048},
+    # 3000, not the 2048 default: the tuned eligibility prompt's factor
+    # enumeration exceeds 2048 output tokens for multi-factor claims — every
+    # attempt truncated mid-JSON (llm_usage showed out=2048 exactly), the SDK
+    # parsed None, and the agent exhausted its retry cap. Same budget as the
+    # document agent's verbose extraction.
+    "eligibility": {"temperature": 0.1, "max_tokens": 3000},
     "decision": {"temperature": 0.4, "max_tokens": 2500},
 }
 
