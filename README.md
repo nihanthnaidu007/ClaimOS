@@ -69,6 +69,11 @@ crash loses at most the single stage in flight.
 - **Policy lookup** by exact policy number or free-text search.
 - **Claim history** — sortable table with expandable per-agent traces.
 - **PDF decision letters** for adjudicated claims.
+- **Customer status portal** — claim-number + hashed access-code lookup (no
+  login), milestone timeline, decision-letter PDF, a plain-language
+  "What happens next" card, and an honest ETA ("within about 3 business
+  days…" — never a fabricated date; the field is omitted when the SLA state
+  can't back one).
 - **Seeded demo data** — 10 policies and 15 historical claims are seeded
   automatically when the database is empty.
 

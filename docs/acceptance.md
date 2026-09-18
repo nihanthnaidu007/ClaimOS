@@ -64,6 +64,18 @@ Captured at viewport 1440×900 by the suite itself (`E2E_EVIDENCE_DIR`), uploade
 
 Fault-gated flows that skip in the default local run (agent-failure's PROCESSING FAILED surface, refusal retry) are captured by CI's compose job artifacts. Screenshots are the evidence medium throughout: each AC's flow is verified as a sequence of terminal states (blocked form → submitted → decision panel → portal), satisfying the plan's state-pair rule without video.
 
+## Feature wave 2 — customer transparency (F2)
+
+Wave-2 acceptance criteria (Feature F2 spec, `art_442ZCjeO`) are covered on `feat/portal-next-steps`:
+
+| AC | Criterion | Proven by |
+|---|---|---|
+| AC-2.1 | Non-empty next-step copy for every pipeline stage and terminal state; deny-by-default wire allowlist | `backend/tests/test_status_portal.py::test_next_steps_nonempty_for_every_pipeline_stage` (parametrized over the six `PIPELINE_STAGES`), `::test_next_steps_nonempty_for_terminal_states` (decided/reopened/failed), `::test_projection_allowlist_blocks_internal_fields` (PII/trace fields can never leak), `::test_portal_stage_copy_tracks_pipeline_stages` (copy stays keyed to the real pipeline) |
+| AC-2.2 | Honest ETA derived from existing SLA state; field omitted (not empty/null) when SLA state is absent | `::test_eta_present_when_sla_state_exists`, `::test_eta_breached_phrase_names_the_delay_without_a_date`, `::test_eta_absent_omits_field_when_sla_state_is_absent`, `::test_eta_absent_when_nothing_is_pending`, plus API round-trips `::test_lookup_returns_next_steps_and_eta` / `::test_lookup_omits_eta_field_without_sla_state` (exclude_unset wire behavior) |
+| AC-2.3 | "What happens next" portal card with loading, error, and empty states | `frontend/src/components/NextStepsCard.test.jsx` (content + ETA chip, chip omitted without ETA, skeleton loading, named error + Retry, instructive empty state); fixture-mode E2E `frontend/e2e/status-portal.spec.js` asserts the card on the decided claim and that no ETA chip renders |
+
+All copy lives in the single `PORTAL_STAGE_COPY` constant (`backend/app/status_portal.py`); no agent/LLM output is ever quoted to the customer.
+
 ## Known gaps / deferred
 
 | Gap | Why | Owner |

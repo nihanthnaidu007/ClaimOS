@@ -5,17 +5,30 @@ valid lookups return the masked payload only (first name + status), wrong
 codes, unknown numbers, and codeless legacy claims all return the identical
 generic 404 (nothing is enumerable), and the lookup endpoint rate-limits.
 
+Also covers the F2 projection (next-step copy + honest ETA): non-empty copy
+for every pipeline stage and terminal state, the deny-by-default allowlist,
+and the ETA present/omitted branches.
+
 Covers: valid code, invalid code, rate-limited, non-enumerable errors.
 """
 
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from starlette.testclient import TestClient
 
 import server
+from agents import PIPELINE_STAGES
 from app.config import settings
-from app.status_portal import access_code_hash, generate_access_code, status_not_found
+from app.status_portal import (
+    PORTAL_STAGE_COPY,
+    _PORTAL_STAGE_ORDER,
+    access_code_hash,
+    generate_access_code,
+    public_status_payload,
+    status_not_found,
+)
 
 ALLOWED_ORIGINS = ["http://localhost:5173", "http://localhost:8001"]
 
@@ -289,3 +302,210 @@ def test_decision_letter_rejects_wrong_code(client, patched_mongo):
     )
     assert response.status_code == 404
     assert response.json() == status_not_found()
+
+
+# ============ F2: next-step guidance + honest ETA ============
+
+
+# The projection's wire allowlist: exactly the fields a customer may see.
+# Anything added to the payload without being added here fails the test.
+PORTAL_PAYLOAD_ALLOWLIST = frozenset({
+    "claimNumber", "firstName", "status", "statusLabel", "currentStage",
+    "incidentType", "decisionOutcome", "decisionReady", "pdfAvailable",
+    "milestones", "nextSteps", "expectedResolution",
+})
+
+STAGE_NAMES = tuple(stage["name"] for stage in PIPELINE_STAGES)
+
+
+def _projection_claim(**overrides):
+    """A claim dict shaped like the stored document, tuned per test."""
+    claim = {
+        "id": "CLM-20260917-042",
+        "holder_name": "Sarah Chen",
+        "incident_type": "theft",
+        "claimed_amount": 800.0,  # theft under the low-severity amount -> low -> 72h SLA
+        "status": "pending",
+        "created_at": _now(),
+        "agent_trace": {},
+    }
+    claim.update(overrides)
+    return claim
+
+
+def _events_through(stage_index):
+    """Event dicts completing every stage before stage_index, then starting it."""
+    events = [{"event": "claim_submitted", "data": {}, "seq": 0, "created_at": _now()}]
+    seq = 1
+    for i in range(stage_index):
+        events.append({"event": "agent_start", "data": {"agent": STAGE_NAMES[i]},
+                       "seq": seq, "created_at": _now()})
+        seq += 1
+        events.append({"event": "agent_complete", "data": {"agent": STAGE_NAMES[i]},
+                       "seq": seq, "created_at": _now()})
+        seq += 1
+    if stage_index < len(STAGE_NAMES):
+        events.append({"event": "agent_start", "data": {"agent": STAGE_NAMES[stage_index]},
+                       "seq": seq, "created_at": _now()})
+    return events
+
+
+def test_portal_stage_copy_tracks_pipeline_stages():
+    """PORTAL_STAGE_COPY stays keyed to the real pipeline: the projection's
+    ordered stage tuple must equal agents.PIPELINE_STAGES, and every key the
+    customer can hit (all six stages + decided/reopened/failed) must carry
+    non-empty copy."""
+    assert _PORTAL_STAGE_ORDER == STAGE_NAMES
+    assert set(PORTAL_STAGE_COPY) == set(STAGE_NAMES) | {"decided", "reopened", "failed"}
+    for text in PORTAL_STAGE_COPY.values():
+        assert isinstance(text, str) and text.strip()
+
+
+@pytest.mark.parametrize("stage_index", range(len(STAGE_NAMES)))
+def test_next_steps_nonempty_for_every_pipeline_stage(stage_index):
+    """AC-2.1: a claim at any stage gets non-empty next-step copy, starting at
+    the stage that is running now."""
+    claim = _projection_claim()
+    payload = public_status_payload(claim, _events_through(stage_index))
+
+    steps = payload["nextSteps"]
+    assert steps and all(step.strip() for step in steps)
+    assert steps[0] == PORTAL_STAGE_COPY[STAGE_NAMES[stage_index]]
+
+
+@pytest.mark.parametrize(
+    ("overrides", "key"),
+    [
+        ({"agent_trace": {"decision": {"verdict": "approved"}}}, "decided"),
+        ({"status": "auto_approved"}, "decided"),
+        ({"status": "reopened"}, "reopened"),
+        ({"status": "failed"}, "failed"),
+    ],
+)
+def test_next_steps_nonempty_for_terminal_states(overrides, key):
+    """AC-2.1: terminal states never render an empty card."""
+    payload = public_status_payload(_projection_claim(**overrides), [])
+    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[key]]
+
+
+def test_next_steps_show_full_run_before_events_start():
+    """A queued claim (no events yet) previews the whole pipeline."""
+    payload = public_status_payload(_projection_claim(), [])
+    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[stage] for stage in STAGE_NAMES]
+
+
+def test_projection_allowlist_blocks_internal_fields():
+    """AC-2.1 deny-by-default: fields an internal trace gains tomorrow have no
+    path into the customer payload, and no PII/credential ever appears."""
+    claim = _projection_claim(
+        contact_email="sarah.chen@example.com",
+        policy_number="AUTO-2024-001847",
+        access_code="plaintext-code",
+        risk_score=91,
+        fraud_score=0.91,
+        escalation_reason="internal",
+        failure_reason="internal",
+        agent_trace={
+            "decision": {"verdict": "approved"},
+            "fraud": {"score": 0.91, "similar_incidents": [{"citedClaimId": "CLM-20260908-008"}]},
+            "eligibility": {"confidence": 0.42},
+            "internal_notes": "adjuster only",
+        },
+    )
+
+    payload = public_status_payload(claim, _events_through(1))
+
+    assert set(payload) <= PORTAL_PAYLOAD_ALLOWLIST
+    raw = str(payload)
+    for secret in (
+        "Chen",
+        "sarah.chen@example.com",
+        "AUTO-2024-001847",
+        "plaintext-code",
+        "0.91",
+        "adjuster only",
+        "CLM-20260908-008",
+    ):
+        assert secret not in raw
+
+
+def test_eta_present_when_sla_state_exists():
+    """AC-2.2 present branch: a fresh low-severity claim has a 72h target, and
+    the phrase renders it as business days without promising a date."""
+    payload = public_status_payload(_projection_claim(), _events_through(0))
+
+    eta = payload["expectedResolution"]
+    assert eta and "within about 3 business days" in eta
+    # Never a fabricated date or timestamp in the ETA.
+    assert "/" not in eta and "-" not in eta
+
+
+def test_eta_breached_phrase_names_the_delay_without_a_date():
+    """An aged claim past its SLA target says so honestly instead of promising."""
+    created = (datetime.now(timezone.utc) - timedelta(hours=80)).isoformat()
+    payload = public_status_payload(_projection_claim(created_at=created), [])
+
+    eta = payload["expectedResolution"]
+    assert eta and "taking longer than we usually aim for" in eta
+    assert "business day" not in eta
+
+
+def test_eta_absent_omits_field_when_sla_state_is_absent():
+    """AC-2.2 absent branch: no created_at -> no SLA clock -> the key is
+    omitted entirely, never an empty string."""
+    payload = public_status_payload(_projection_claim(created_at=None), [])
+    assert "expectedResolution" not in payload
+
+    payload = public_status_payload(_projection_claim(created_at="not-a-date"), [])
+    assert "expectedResolution" not in payload
+
+
+def test_eta_absent_when_nothing_is_pending():
+    """Decided, failed, and reopened claims have no honest ETA."""
+    for overrides in (
+        {"agent_trace": {"decision": {"verdict": "approved"}}},
+        {"status": "failed"},
+        {"status": "reopened"},
+    ):
+        payload = public_status_payload(_projection_claim(**overrides), [])
+        assert "expectedResolution" not in payload
+
+
+def test_lookup_returns_next_steps_and_eta(client, patched_mongo):
+    """API round-trip: the projection fields ride the masked response."""
+    db = patched_mongo
+    code = _make_claim(db)
+
+    body = _lookup(client, "CLM-20260917-042", code).json()
+    assert body["nextSteps"] and all(isinstance(step, str) for step in body["nextSteps"])
+    assert re.search(r"within about \d+ business days?", body["expectedResolution"])
+
+
+def test_lookup_omits_eta_field_without_sla_state(client, patched_mongo):
+    """API round-trip absent branch: the response body drops the key entirely
+    (exclude_unset), so an older cached client cannot mistake null for a value."""
+    db = patched_mongo
+    code = generate_access_code()
+    _run(
+        db.claims.insert_one({
+            "id": "CLM-20260917-090",
+            "policy_number": "AUTO-2024-001847",
+            "claim_date": _now(),
+            "incident_type": "accident",
+            "claimed_amount": 1200.0,
+            "status": "pending",
+            "risk_score": 0,
+            "decision_reason": "",
+            "agent_trace": {},
+            "agent_logs": [],
+            "holder_name": "Sarah Chen",
+            "contact_email": "sarah.chen@example.com",
+            "is_historical": False,
+            # No created_at: legacy rows predate the SLA clock.
+            "access_code_hash": access_code_hash(code),
+        })
+    )
+
+    body = _lookup(client, "CLM-20260917-090", code).json()
+    assert "expectedResolution" not in body
+    assert body["nextSteps"]  # the card copy does not depend on the ETA
