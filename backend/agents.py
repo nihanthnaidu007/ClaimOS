@@ -238,9 +238,13 @@ async def tool_claim_history(policy_number):
     """
     start = time.time()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
+    # agent_logs excluded: it is audit data (and after a retry-loop failure can
+    # be megabytes). Every claim's policy agent embeds this payload in its
+    # prompt and logs it back into its own agent_logs — without the projection
+    # the bloat compounds claim over claim until the LLM rejects the prompt.
     claims = await claims_col.find(
         {"policy_number": policy_number, "claim_date": {"$gte": cutoff}},
-        {"_id": 0}
+        {"_id": 0, "agent_logs": 0}
     ).to_list(100)
     duration = int((time.time() - start) * 1000)
     return {"claims": claims, "count": len(claims), "duration_ms": duration}
