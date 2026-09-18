@@ -171,6 +171,23 @@ def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
     return row
 
 
+def matches_search(row: dict, query: str) -> bool:
+    """Case-insensitive queue search over the row's identity fields (spec F8).
+
+    Claim number matches by prefix; policy number and customer name by
+    substring. One hit on any field passes. A blank query is a no-op so
+    callers can filter unconditionally.
+    """
+    needle = query.strip().lower()
+    if not needle:
+        return True
+    return (
+        str(row.get("id", "")).lower().startswith(needle)
+        or needle in str(row.get("policy_number", "")).lower()
+        or needle in str(row.get("holder_name", "")).lower()
+    )
+
+
 def _confidence(trace: dict) -> float | None:
     eligibility = trace.get("eligibility") or {}
     decision = trace.get("decision") or {}
