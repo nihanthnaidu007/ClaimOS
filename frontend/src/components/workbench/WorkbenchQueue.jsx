@@ -1,12 +1,15 @@
 // Adjuster workbench queue: reviewable claims with status/severity/age
 // filters, SLA aging badges, sorting, and live updates over the authenticated
-// SSE queue stream. Row click opens the case view.
+// SSE queue stream. Row click opens the case view. Saved views (F12) persist
+// the filter bar per adjuster; multi-select feeds audited bulk actions.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   AlertOctagon,
   ArrowDownUp,
+  Bookmark,
   CheckCircle2,
+  Flag,
   OctagonAlert,
   RefreshCw,
   Search,
@@ -18,13 +21,16 @@ import {
 import api from '@/lib/api';
 import { openWorkbenchStream } from '@/lib/workbenchStream';
 import {
+  filtersToViewPreset,
   formatCurrency,
   formatHours,
   severityPresentation,
   slaBadgeText,
   slaPresentation,
   statusClassName,
+  viewPresetToFilters,
 } from '@/lib/workbench';
+import BulkActionModal from './BulkActionModal';
 
 const SLA_ICONS = { 'octagon-alert': OctagonAlert, timer: Timer, 'check-circle': CheckCircle2 };
 
@@ -86,6 +92,17 @@ export default function WorkbenchQueue() {
   const [reloadKey, setReloadKey] = useState(0);
   const streamDisposeRef = useRef(null);
 
+  // F12: multi-select + audited bulk actions.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkAction, setBulkAction] = useState(null); // null | 'flag' | 'reassign'
+
+  // F12: owner-private saved views.
+  const [views, setViews] = useState(null); // null = loading
+  const [activeViewId, setActiveViewId] = useState(null);
+  const [savingViewOpen, setSavingViewOpen] = useState(false);
+  const [viewName, setViewName] = useState('');
+  const [viewError, setViewError] = useState(null);
+
   // Debounce the search box: the query joins the filter set only after the
   // user stops typing. A no-op update returns `prev` so filters that did not
   // change never retrigger the REST load or the SSE stream.
@@ -108,8 +125,13 @@ export default function WorkbenchQueue() {
     [filters]
   );
 
-  // Initial + filter-change + manual-retry load.
+  const selectedCount = selectedIds.size;
+  const allSelected = rows !== null && rows.length > 0 && rows.every((row) => selectedIds.has(row.id));
+
+  // Initial + filter-change + manual-retry load. While a saved view is
+  // applied, the view owns the rows — editing a filter exits view mode.
   useEffect(() => {
+    if (activeViewId) return undefined;
     let cancelled = false;
     setError(null);
     api
@@ -125,7 +147,7 @@ export default function WorkbenchQueue() {
     return () => {
       cancelled = true;
     };
-  }, [queryParams, reloadKey]);
+  }, [queryParams, reloadKey, activeViewId]);
 
   // Live updates: one stream per filter set; each frame replaces the rows.
   useEffect(() => {
@@ -144,7 +166,27 @@ export default function WorkbenchQueue() {
     return dispose;
   }, [queryParams]);
 
+  // F12: load the adjuster's saved views once; a failure leaves the queue
+  // usable without chips rather than blocking triage.
+  useEffect(() => {
+    api
+      .get('/workbench/views')
+      .then((res) => setViews(res.data))
+      .catch(() => setViews([]));
+  }, []);
+
+  // Drop selection for rows that left the current result set (stream frames,
+  // filter changes, applied views) so bulk actions never touch stale ids.
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0 || rows === null) return prev;
+      const next = new Set([...prev].filter((id) => rows.some((row) => row.id === id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [rows]);
+
   function setFilter(key, value) {
+    setActiveViewId(null); // editing filters exits the applied view
     setFilters((prev) => ({ ...prev, [key]: value }));
   }
 
@@ -152,6 +194,139 @@ export default function WorkbenchQueue() {
     setSearchDraft('');
     setFilter('search', ''); // immediate — clearing does not wait for the debounce
   }
+
+  function toggleRow(id) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelectedIds(() => (allSelected ? new Set() : new Set((rows || []).map((row) => row.id))));
+  }
+
+  async function refreshViews() {
+    const res = await api.get('/workbench/views');
+    setViews(res.data);
+    return res.data;
+  }
+
+  async function saveView() {
+    const name = viewName.trim();
+    if (!name) return;
+    setViewError(null);
+    try {
+      await api.post('/workbench/views', { name, filters: filtersToViewPreset(filters) });
+      await refreshViews();
+      setSavingViewOpen(false);
+      setViewName('');
+    } catch (err) {
+      setViewError(err?.response?.data?.detail || 'Could not save the view. Try again.');
+    }
+  }
+
+  async function applySavedView(view) {
+    setViewError(null);
+    try {
+      const { data } = await api.get(`/workbench/views/${view.id}/apply`);
+      setActiveViewId(view.id);
+      setRows(data.rows);
+      setFilters(viewPresetToFilters(data.view.filters));
+    } catch (err) {
+      setViewError(err?.response?.data?.detail || 'Could not apply the view. Try again.');
+    }
+  }
+
+  async function deleteView(viewId) {
+    setViewError(null);
+    try {
+      await api.delete(`/workbench/views/${viewId}`);
+      await refreshViews();
+    } catch (err) {
+      setViewError(err?.response?.data?.detail || 'Could not delete the view. Try again.');
+    }
+  }
+
+  function handleBulkApplied() {
+    // Keep the modal open so the per-claim outcome is visible; just reset the
+    // selection behind it. Closing happens via the modal's Done button.
+    setSelectedIds(new Set());
+  }
+
+  const savedViewsBar = (
+    <div className="mt-3 flex flex-wrap items-center gap-2" data-testid="saved-views-bar">
+      <span className="inline-flex items-center text-xs uppercase tracking-wider text-[#8b96ab] font-mono">
+        <Bookmark className="w-3.5 h-3.5 mr-1.5" aria-hidden />
+        Views
+      </span>
+      {(views || []).map((view) => (
+        <span
+          key={view.id}
+          className={`inline-flex items-center gap-1 border rounded-md pl-2 pr-1 py-1 text-xs ${
+            activeViewId === view.id
+              ? 'border-[#3b82f6]/60 bg-[#3b82f6]/10 text-[#7cb0ff]'
+              : 'border-[#1a1f2e] bg-[#0d1119] text-[#8b96ab]'
+          }`}
+        >
+          <button
+            type="button"
+            data-testid={`view-chip-${view.id}`}
+            onClick={() => applySavedView(view)}
+            className="hover:text-[#e2e8f0]"
+            title={`Apply view: ${view.name}`}
+          >
+            {view.name}
+          </button>
+          <button
+            type="button"
+            data-testid={`view-delete-${view.id}`}
+            onClick={() => deleteView(view.id)}
+            className="text-[#4a5568] hover:text-[#ef4444]"
+            aria-label={`Delete view ${view.name}`}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {savingViewOpen ? (
+        <span className="inline-flex items-center gap-2">
+          <input
+            data-testid="view-name-input"
+            value={viewName}
+            onChange={(e) => setViewName(e.target.value)}
+            placeholder="View name"
+            autoFocus
+            className="w-40 bg-[#0d1119] border border-[#1a1f2e] rounded-md px-2 py-1 text-sm text-[#e2e8f0] focus:outline-none focus:border-[#3b82f6]"
+          />
+          <button
+            type="button"
+            data-testid="view-save-confirm"
+            onClick={saveView}
+            disabled={!viewName.trim()}
+            className="rounded-md bg-[#3b82f6] px-2.5 py-1 text-xs font-medium text-white disabled:opacity-40"
+          >
+            Save
+          </button>
+        </span>
+      ) : (
+        <button
+          type="button"
+          data-testid="save-view-button"
+          onClick={() => {
+            setSavingViewOpen(true);
+            setViewError(null);
+          }}
+          className="inline-flex items-center gap-1 rounded-md border border-[#1a1f2e] bg-[#0d1119] px-2 py-1 text-xs text-[#8b96ab] hover:text-[#e2e8f0]"
+        >
+          <Bookmark className="w-3 h-3" aria-hidden />
+          Save current filters
+        </button>
+      )}
+    </div>
+  );
 
   const filterBar = (
     <div className="flex flex-wrap items-center gap-3" data-testid="queue-filters">
@@ -236,6 +411,43 @@ export default function WorkbenchQueue() {
     </div>
   );
 
+  const bulkBar =
+    selectedCount > 0 && rows !== null && rows.length > 0 ? (
+      <div
+        data-testid="bulk-bar"
+        className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-[#3b82f6]/40 bg-[#3b82f6]/10 px-4 py-2.5"
+      >
+        <span data-testid="bulk-selected-count" className="text-xs font-mono text-[#7cb0ff]">
+          {selectedCount} selected
+        </span>
+        <button
+          type="button"
+          data-testid="bulk-reassign-button"
+          onClick={() => setBulkAction('reassign')}
+          className="rounded-md border border-[#1a1f2e] bg-[#0d1119] px-2.5 py-1.5 text-xs text-[#e2e8f0] hover:border-[#3b82f6]"
+        >
+          Reassign
+        </button>
+        <button
+          type="button"
+          data-testid="bulk-flag-button"
+          onClick={() => setBulkAction('flag')}
+          className="inline-flex items-center gap-1 rounded-md border border-[#1a1f2e] bg-[#0d1119] px-2.5 py-1.5 text-xs text-[#e2e8f0] hover:border-[#f59e0b]"
+        >
+          <Flag className="w-3 h-3" aria-hidden />
+          Flag for review
+        </button>
+        <button
+          type="button"
+          data-testid="bulk-clear"
+          onClick={() => setSelectedIds(new Set())}
+          className="text-xs text-[#8b96ab] underline hover:no-underline"
+        >
+          Clear
+        </button>
+      </div>
+    ) : null;
+
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="workbench-queue">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -251,7 +463,14 @@ export default function WorkbenchQueue() {
         <LiveIndicator status={streamStatus} />
       </div>
 
-      <div className="mt-4">{filterBar}</div>
+      {savedViewsBar}
+      <div className="mt-3">{filterBar}</div>
+      {viewError && (
+        <div className="mt-3 text-sm text-[#f59e0b]" data-testid="view-error" role="alert">
+          {viewError}
+        </div>
+      )}
+      {bulkBar}
 
       {error && (
         <div
@@ -310,6 +529,16 @@ export default function WorkbenchQueue() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#0d1119] text-[#8b96ab] text-xs uppercase tracking-wider font-mono">
+                <th className="w-8 px-2 py-2.5">
+                  <input
+                    type="checkbox"
+                    data-testid="select-all"
+                    aria-label="Select all claims in the current filter"
+                    checked={allSelected}
+                    onChange={toggleSelectAll}
+                    className="accent-[#3b82f6]"
+                  />
+                </th>
                 <th className="text-left px-4 py-2.5 font-medium">Claim</th>
                 <th className="text-left px-4 py-2.5 font-medium">Holder</th>
                 <th className="text-left px-4 py-2.5 font-medium">Type</th>
@@ -328,6 +557,16 @@ export default function WorkbenchQueue() {
                   data-testid={`queue-row-${row.id}`}
                   className="border-t border-[#1a1f2e] hover:bg-[#0d1119] cursor-pointer transition-colors"
                 >
+                  <td className="px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      data-testid={`select-row-${row.id}`}
+                      aria-label={`Select claim ${row.id}`}
+                      checked={selectedIds.has(row.id)}
+                      onChange={() => toggleRow(row.id)}
+                      className="accent-[#3b82f6]"
+                    />
+                  </td>
                   <td className="px-4 py-3 font-mono text-[#7cb0ff]">{row.id}</td>
                   <td className="px-4 py-3 text-[#e2e8f0]">{row.holder_name || '—'}</td>
                   <td className="px-4 py-3 text-[#8b96ab]">{row.incident_type || '—'}</td>
@@ -348,6 +587,16 @@ export default function WorkbenchQueue() {
                           className={`inline-block border rounded px-1.5 py-0.5 text-[11px] font-mono font-bold uppercase ${(row.fraud_flags || []).some(f => f.severity === 'high') ? 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#ef4444]' : 'border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[#f59e0b]'}`}
                         >
                           Flagged
+                        </span>
+                      )}
+                      {(row.flags || []).length > 0 && (
+                        <span
+                          data-testid={`queue-review-flags-${row.id}`}
+                          title="Flagged for review"
+                          className="inline-flex items-center gap-1 border border-[#f59e0b]/40 bg-[#f59e0b]/10 rounded px-1.5 py-0.5 text-[11px] font-mono text-[#f59e0b]"
+                        >
+                          <Flag className="w-3 h-3" aria-hidden />
+                          Review ×{(row.flags || []).length}
                         </span>
                       )}
                     </span>
@@ -371,6 +620,15 @@ export default function WorkbenchQueue() {
           </table>
         </div>
       )}
+
+      <BulkActionModal
+        open={bulkAction !== null}
+        action={bulkAction ?? 'flag'}
+        claimCount={selectedCount}
+        claimIds={[...selectedIds]}
+        onApplied={handleBulkApplied}
+        onClose={() => setBulkAction(null)}
+      />
     </div>
   );
 }

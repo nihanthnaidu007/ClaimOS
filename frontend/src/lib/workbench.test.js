@@ -8,6 +8,8 @@ import {
   slaBadgeText,
   slaPresentation,
   statusClassName,
+  filtersToViewPreset,
+  viewPresetToFilters,
 } from './workbench';
 
 describe('workbench helpers', () => {
@@ -66,5 +68,29 @@ describe('workbench helpers', () => {
     expect(isReviewable('under_review')).toBe(true);
     expect(isReviewable('approved')).toBe(false);
     expect(isReviewable('overridden')).toBe(false);
+  });
+});
+
+describe('saved-view filter mapping (F12)', () => {
+  it('maps filter-bar state to the queue wire format, dropping empty filters', () => {
+    expect(
+      filtersToViewPreset({ status: '', severity: '', minAgeHours: '', maxAgeHours: '', sort: 'age' })
+    ).toEqual({ sort: 'age' });
+    expect(
+      filtersToViewPreset({ status: 'escalated', severity: '', minAgeHours: '4', maxAgeHours: '', sort: 'severity' })
+    ).toEqual({ status: 'escalated', min_age_hours: 4, sort: 'severity' });
+  });
+
+  it('round-trips a preset back into full filter-bar state', () => {
+    const preset = { severity: 'elevated', min_age_hours: 4, sort: 'risk' };
+    const filters = viewPresetToFilters(preset);
+    expect(filters).toEqual({
+      status: '',
+      severity: 'elevated',
+      minAgeHours: 4,
+      maxAgeHours: '',
+      sort: 'risk',
+    });
+    expect(filtersToViewPreset(filters)).toEqual(preset);
   });
 });

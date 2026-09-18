@@ -104,3 +104,30 @@ export const REVIEWABLE_STATUSES = ['escalated', 'pending', 'under_review'];
 export function isReviewable(status) {
   return REVIEWABLE_STATUSES.includes(status);
 }
+
+// ---- Saved views (F12): filter-bar state <-> stored preset ----
+
+// UI filter state -> the wire preset saved in a view. Empty filters are
+// dropped so a view stores only what the adjuster actually set.
+export function filtersToViewPreset(filters) {
+  const preset = {};
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === '' || value == null) continue;
+    if (key === 'minAgeHours') preset.min_age_hours = Number(value);
+    else if (key === 'maxAgeHours') preset.max_age_hours = Number(value);
+    else preset[key] = value;
+  }
+  return preset;
+}
+
+// Inverse: a stored preset -> full filter-bar state with the queue's initial
+// defaults for anything the preset omitted.
+export function viewPresetToFilters(preset) {
+  return {
+    status: preset.status ?? '',
+    severity: preset.severity ?? '',
+    minAgeHours: preset.min_age_hours ?? '',
+    maxAgeHours: preset.max_age_hours ?? '',
+    sort: preset.sort ?? 'age',
+  };
+}
