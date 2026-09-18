@@ -25,6 +25,21 @@ function setAgent(state, agent, patch) {
   };
 }
 
+// Typed agents (#31) emit tool-call arguments as objects, but the board
+// renders inputs inline — normalize every input to a string at ingestion,
+// the single choke point all SSE consumers share.
+export function normalizeToolCalls(tools) {
+  return (tools || []).map((tool) => ({
+    ...tool,
+    input:
+      typeof tool?.input === 'string'
+        ? tool.input
+        : tool?.input == null
+          ? ''
+          : JSON.stringify(tool.input),
+  }));
+}
+
 // One SSE event → next state. Unknown event types are ignored (forward
 // compatibility: an older board must not crash on a newer worker).
 export function reducePipelineEvent(state, event) {
@@ -42,7 +57,7 @@ export function reducePipelineEvent(state, event) {
       return setAgent(state, event.agent, {
         status: 'done',
         output: event.output || {},
-        toolsCalled: event.toolsCalled || [],
+        toolsCalled: normalizeToolCalls(event.toolsCalled),
         duration: event.duration || 0,
       });
 

@@ -54,7 +54,6 @@ test('wizard blocks invalid input, resumes drafts, and reports policy misses', a
 });
 
 test('submission runs the live pipeline to a persisted decision', async ({ page }) => {
-  test.setTimeout(320_000); // five real agents, LLM-backed
   await uiLogin(page, user);
   await page.goto('/new-claim');
 
