@@ -21,7 +21,8 @@ Glass-box AI claims adjudication platform. A FastAPI API and a separate durable 
 - `CORS_ORIGINS` — comma-separated allowlist (default `*`)
 - `ANTHROPIC_API_KEY` — optional at boot; the first real LLM call fails closed if unset. `LLM_PROVIDER` = `anthropic` (default) | `fixture` — the fixture adapter (`backend/app/llm/fixture.py`) scripts the whole pipeline deterministically (zero API spend) and is what CI/E2E run on. `FIXTURE_FAULT=timeout:intake|refusal:decision` injects live-LLM failure classes. Adapter tuning: `LLM_MAX_RETRIES=3`, `LLM_TIMEOUT_S` (config default 180s).
 - Auth: `JWT_SECRET` (HS256; required non-empty in production — dev falls back to an obviously-insecure secret), `ACCESS_TOKEN_TTL_MINUTES=15`, `REFRESH_TOKEN_TTL_DAYS=7`, `INVITE_CODE` (exact code `/api/auth/register` requires; empty disables registration entirely), `DEMO_ADJUSTER_EMAIL/PASSWORD`, `DEMO_CUSTOMER_EMAIL/PASSWORD` (seeded at startup for dev; empty skips that role), `COOKIE_SECURE` (forced outside development)
-- Rate limits (slowapi syntax, per client IP): `LOGIN_RATE_LIMIT=5/minute`, `FNOL_RATE_LIMIT=10/minute`, `STATUS_LOOKUP_RATE_LIMIT=60/minute`
+- Rate limits (slowapi syntax, per client IP): `LOGIN_RATE_LIMIT=5/minute`, `FNOL_RATE_LIMIT=10/minute`, `STATUS_LOOKUP_RATE_LIMIT=60/minute`, `ACCESS_CODE_RECOVERY_RATE_LIMIT=3/minute`
+- Email delivery: `EMAIL_PROVIDER` = `console` (default, logs structured events) | `smtp` — SMTP config: `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_USE_TLS` (true) / `SMTP_SSL` (false). `EMAIL_DISABLED=false` — `ENVIRONMENT=production` boots only with configured SMTP (`SMTP_HOST`+`SMTP_FROM`) or `EMAIL_DISABLED=true`.
 - STP gate: `STP_CONFIDENCE_THRESHOLD=0.85`, `STP_LOW_SEVERITY_AMOUNT=10000`, `STP_LOW_SEVERITY_TYPES=theft,weather_damage,vandalism`
 - Uploads: `UPLOAD_DIR=/data/uploads`, `UPLOAD_MAX_BYTES` (10 MiB), `UPLOAD_ALLOWED_CONTENT_TYPES`
 - Worker: `WORKER_POLL_INTERVAL_S=1`
