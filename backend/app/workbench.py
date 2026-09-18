@@ -13,10 +13,11 @@ from app.config import settings
 from app.stp import ELEVATED, LOW, assess_claim_severity
 
 # Statuses a human still has to act on — the workbench queue's default scope.
-REVIEWABLE_STATUSES = frozenset({"escalated", "pending", "under_review"})
+# "reopened" (F14) is a review state: a human re-decides, no pipeline re-run.
+REVIEWABLE_STATUSES = frozenset({"escalated", "pending", "reopened", "under_review"})
 
 # Once a claim carries one of these statuses a decision is on record;
-# overriding it again is a re-open flow, not a queue action.
+# the only path back to review is the reopen flow (F14).
 DECIDED_STATUSES = frozenset(
     {"auto_approved", "approved", "rejected", "overridden", "settled", "failed"}
 )
@@ -333,5 +334,6 @@ def build_case_summary(claim: dict) -> dict:
         "escalationReason": claim.get("escalation_reason") or None,
         "failureReason": claim.get("failure_reason") or None,
         "override": claim.get("override") or None,
+        "reopen": claim.get("reopen") or None,
         "source": "stored agent traces",
     }
