@@ -150,6 +150,15 @@ PDF letters, seeded data — is verified manually: start the backend, submit a
 claim for a seeded policy number from the UI, and watch the pipeline stream to
 a decision letter.
 
+## Documentation
+
+| Doc | For |
+|---|---|
+| [User guide](docs/user-guide.md) | Adjusters working claims in the console, and customers checking on a claim |
+| [Operator guide](docs/operator-guide.md) | Running ClaimOS: quickstart, environment variables, CI, backups, triage |
+| [API reference](docs/api-reference.md) | Every route, verified against the code: auth, claims, streams, portal, workbench |
+| [Demo script](docs/demo-script.md) | A 10-minute guided demo with a rehearsal-ready beat sheet |
+
 ## License
 
 [MIT](LICENSE) — © Kalisetti Nihanth Naidu
