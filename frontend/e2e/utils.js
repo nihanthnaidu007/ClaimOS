@@ -83,12 +83,14 @@ export async function apiLogin(request, { email, password }) {
 // stay traceable to the policy a spec chose. The eligibility stage adds +25
 // risk ("3+ claims on this policy in the past 12 months") once a policy
 // carries 3 claims in a year, counting the claim under evaluation — the
-// suite submits ~7 pipeline claims, so approval-asserting specs must spread
+// suite submits ~8 pipeline claims, so approval-asserting specs must spread
 // across policies. Assignment (files run alphabetically: agent-failure,
-// fnol, override, refusal-fallback, sse-fallback, status-portal,
-// stp-approval; agent-failure and refusal-fallback are CI-only):
+// fnol, override, portal-upload, refusal-fallback, sse-fallback,
+// status-portal, stp-approval, validation; agent-failure and
+// refusal-fallback are CI-only):
 //
-//   AUTO-2024-001847 ($500 ded): agent-failure, stp-approval   -> stp is 2nd, clean
+//   AUTO-2024-001847 ($500 ded): portal-upload, agent-failure, stp-approval
+//     -> upload 1st, stp 2nd, clean (agent-failure only asserts a failure UI)
 //   AUTO-2024-008899 ($600 ded): fnol, refusal-fallback, sse   -> refusal 2nd, clean;
 //                                                                  sse is 3rd but only asserts completion
 //   AUTO-2024-012001 ($400 ded): override, status-portal       -> portal 2nd, clean
