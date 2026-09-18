@@ -128,15 +128,20 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   // The persisted claim state is terminal — no pending pill.
   await expect(page.getByTestId('claim-status-pill')).not.toContainText(/pending/i);
 
-  // Upload a supporting PDF on the claim detail surface. The POST is observed
-  // at request level and the 201 is asserted through the persisted row: the
-  // client refetches only on a 2xx upload, so row count +1 IS the accepted
-  // outcome. (CI observed nginx answer 201 while the browser's POST response
-  // was lost to a transient socket reset — a response-level wait starves on
-  // that, a request-level wait plus the persisted row does not.)
+  // Upload a supporting PDF on the claim detail surface. BOTH waits are armed
+  // before setInputFiles: the API answers the upload in ~15ms, so a wait armed
+  // after the interaction starts can miss the entire exchange (the POST fires
+  // from the change handler and completes before the next Playwright command
+  // dispatches) and starve for its full timeout. The 201 itself is asserted
+  // through the persisted row: the client refetches only on a 2xx upload, so
+  // row count +1 IS the accepted outcome.
   const rowsBefore = await page.getByTestId('document-row').count();
   const refetchGet = page.waitForResponse(
     (r) => r.url().includes('/documents') && r.request().method() === 'GET',
+    { timeout: 30_000 }
+  );
+  const uploadPost = page.waitForRequest(
+    (r) => r.url().includes('/documents') && r.method() === 'POST',
     { timeout: 30_000 }
   );
   await page
@@ -145,10 +150,7 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
       mimeType: 'application/pdf',
       buffer: tinyPdf('detail-repair-estimate'),
     });
-  await page.waitForRequest(
-    (r) => r.url().includes('/documents') && r.method() === 'POST',
-    { timeout: 30_000 }
-  );
+  await uploadPost;
   await expect(page.getByTestId('document-row')).toHaveCount(rowsBefore + 1, {
     timeout: 30_000,
   });
