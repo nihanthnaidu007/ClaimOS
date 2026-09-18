@@ -674,7 +674,7 @@ class StatusLookupResponse(BaseModel):
     expectedResolution: Optional[str] = None
     # Reopen flow (F14): customer-facing copy shown while the claim is under
     # review again. None for every other status.
-    statusNote: Optional[str] = None
+    statusMessage: Optional[str] = None
     # F6 decision transparency — the deny-by-default projection's output:
     # pre-written stage summaries and, on decided claims only, the decision's
     # plain-language summary + customer-safe citations. Internal trace data

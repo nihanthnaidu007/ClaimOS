@@ -36,7 +36,7 @@ const formatWhen = (iso) => {
 };
 
 export default function StatusTimeline({ status, onDownloadLetter, downloading }) {
-  const { claimNumber, statusLabel, status: statusKey, statusNote, decisionOutcome, currentStage, decisionReady, pdfAvailable, milestones } = status;
+  const { claimNumber, statusLabel, status: statusKey, statusMessage, decisionOutcome, currentStage, decisionReady, pdfAvailable, milestones } = status;
   const doneCount = milestones.filter((m) => m.done).length;
 
   return (
@@ -57,9 +57,9 @@ export default function StatusTimeline({ status, onDownloadLetter, downloading }
       </div>
 
       {/* F14: customer-facing review-again note, only while reopened. */}
-      {statusNote && (
-        <p data-testid="status-note" className="mb-6 border border-[#f59e0b]/30 bg-[#f59e0b]/5 px-4 py-3 text-sm text-[#e2e8f0]">
-          {statusNote}
+      {statusMessage && (
+        <p data-testid="status-message" className="mb-6 border border-[#f59e0b]/30 bg-[#f59e0b]/5 px-4 py-3 text-sm text-[#e2e8f0]">
+          {statusMessage}
         </p>
       )}
 

@@ -295,7 +295,7 @@ def test_portal_projection_exposes_reopened_status_and_copy():
 
     assert payload["status"] == "reopened"
     assert payload["statusLabel"] == "Being reviewed again"
-    assert payload["statusNote"] == (
+    assert payload["statusMessage"] == (
         "Your claim is being reviewed again — we'll keep you updated as it progresses."
     )
 
@@ -317,7 +317,7 @@ def test_portal_projection_omits_reopened_slot_when_claim_never_reopened():
     payload = public_status_payload(_reopened_claim(status="auto_approved"), submitted_only)
 
     assert all(m["key"] != "reopened" for m in payload["milestones"])
-    assert payload["statusNote"] is None
+    assert payload["statusMessage"] is None
 
 
 def test_portal_projection_stays_deny_by_default_on_reopen():
@@ -357,4 +357,4 @@ def test_portal_lookup_endpoint_serves_reopened_projection(client, adjuster_head
     payload = response.json()
     assert payload["status"] == "reopened"
     assert payload["statusLabel"] == "Being reviewed again"
-    assert payload["statusNote"] is not None
+    assert payload["statusMessage"] is not None

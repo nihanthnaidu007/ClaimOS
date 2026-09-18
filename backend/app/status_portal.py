@@ -264,7 +264,7 @@ def public_document_requests(rows: list[dict]) -> list[dict]:
     ]
 
 
-_REOPEN_STATUS_NOTE = (
+_REOPEN_STATUS_MESSAGE = (
     "Your claim is being reviewed again — we'll keep you updated as it progresses."
 )
 
@@ -306,7 +306,7 @@ def public_status_payload(
         "decisionOutcome": override.get("decision") or decision.get("verdict"),
         "decisionReady": bool(decision),
         "pdfAvailable": bool(decision),
-        "statusNote": _REOPEN_STATUS_NOTE if status == "reopened" else None,
+        "statusMessage": _REOPEN_STATUS_MESSAGE if status == "reopened" else None,
         "milestones": milestones,
         # F2: pre-written stage copy + an ETA derived from existing SLA state.
         "nextSteps": next_steps(claim, current_agent),

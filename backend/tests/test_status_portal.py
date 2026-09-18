@@ -322,6 +322,8 @@ PORTAL_PAYLOAD_ALLOWLIST = frozenset({
     # F4: the document checklist is the customer's own to-do list, projected
     # through _PUBLIC_REQUEST_FIELDS (asserted separately in test_portal_uploads).
     "documentRequests",
+    # F14: customer-facing review-again copy (never the adjuster's reason).
+    "statusMessage",
 })
 
 STAGE_NAMES = tuple(stage["name"] for stage in PIPELINE_STAGES)

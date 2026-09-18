@@ -184,6 +184,6 @@ test('reopening the decided claim returns it to review, then a second decision r
   await expect(page.getByTestId('status-badge')).toContainText('Decision updated');
   await expect(page.getByTestId('decision-outcome')).toContainText('rejected');
   await expect(page.getByTestId('milestone-reopened')).toBeVisible();
-  await expect(page.getByTestId('status-note')).toHaveCount(0);
+  await expect(page.getByTestId('status-message')).toHaveCount(0);
   await saveEvidence(page, 'tc-14-reopen-portal');
 });

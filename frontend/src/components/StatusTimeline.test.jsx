@@ -94,7 +94,7 @@ describe('StatusTimeline', () => {
     renderTimeline({
       status: 'reopened',
       statusLabel: 'Being reviewed again',
-      statusNote: "Your claim is being reviewed again — we'll keep you updated as it progresses.",
+      statusMessage: "Your claim is being reviewed again — we'll keep you updated as it progresses.",
       currentStage: null,
       milestones: [
         ...basePayload.milestones,
@@ -108,7 +108,7 @@ describe('StatusTimeline', () => {
     });
 
     expect(screen.getByTestId('status-badge')).toHaveTextContent('Being reviewed again');
-    expect(screen.getByTestId('status-note')).toHaveTextContent(
+    expect(screen.getByTestId('status-message')).toHaveTextContent(
       /your claim is being reviewed again/i
     );
     expect(screen.getByTestId('milestone-reopened')).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe('StatusTimeline', () => {
 
   it('shows no status note or reopened milestone for claims that never reopened', () => {
     renderTimeline();
-    expect(screen.queryByTestId('status-note')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('status-message')).not.toBeInTheDocument();
     expect(screen.queryByTestId('milestone-reopened')).not.toBeInTheDocument();
   });
 
