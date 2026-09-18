@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Timer, Zap, ShieldAlert, PieChart as PieIcon, AlarmClock, RefreshCw, WifiOff,
+  Timer, Zap, ShieldAlert, PieChart as PieIcon, AlarmClock, RefreshCw, WifiOff, Users,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -176,8 +176,9 @@ export default function OpsAnalytics() {
     );
   }
 
-  const { cycleTime, stp, fraud, decisions, sla } = analytics;
+  const { cycleTime, stp, fraud, decisions, sla, workload } = analytics;
   const isBookEmpty = fraud.totalClaims === 0 && cycleTime.decided === 0;
+  const maxOpen = Math.max(...(workload?.adjusters || []).map((row) => row.openClaims), 0);
 
   const stpData = [
     { name: 'Auto-approved', value: stp.autoApproved, color: '#10b981' },
@@ -361,6 +362,38 @@ export default function OpsAnalytics() {
               <EmptyNote>Severity derives from amount and incident type (same rules as the STP gate).</EmptyNote>
             </div>
           </div>
+        </GroupCard>
+
+        {/* Group 6: Workload per adjuster (spec F10) */}
+        <GroupCard testId="ops-workload">
+          <GroupHeader icon={Users} color="text-[#3b82f6]" title="Workload" subtitle="open claims per adjuster" />
+          {(workload?.adjusters || []).length === 0 ? (
+            <EmptyNote>No active adjusters yet.</EmptyNote>
+          ) : (
+            <div className="space-y-3">
+              {workload.adjusters.map((row) => (
+                <div key={row.assigneeId} data-testid={`ops-workload-${row.assigneeId}`}>
+                  <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.15em] text-[#4a5568] font-mono">
+                    <span>{row.email || row.assigneeId}</span>
+                    <span className="text-[#e2e8f0]">
+                      {row.openClaims} open claim{row.openClaims === 1 ? '' : 's'}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1.5 bg-[#1a1f2e] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-[#3b82f6] rounded-full"
+                      style={{ width: `${maxOpen ? Math.round((row.openClaims / maxOpen) * 100) : 0}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <EmptyNote>
+            <span data-testid="ops-workload-unassigned">
+              {workload?.unassigned ?? 0} unassigned open claim{(workload?.unassigned ?? 0) === 1 ? '' : 's'}
+            </span>
+          </EmptyNote>
         </GroupCard>
       </div>
     </div>

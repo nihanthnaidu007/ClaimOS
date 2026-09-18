@@ -7,19 +7,20 @@ import OpsAnalytics from './OpsAnalytics';
 import { server, opsAnalytics } from '../../test/handlers';
 
 describe('OpsAnalytics', () => {
-  it('renders the five metric groups from the mocked analytics API', async () => {
+  it('renders the six metric groups from the mocked analytics API', async () => {
     render(<OpsAnalytics />);
 
     await waitFor(() =>
       expect(screen.getByTestId('ops-analytics')).toBeInTheDocument()
     );
 
-    // The five metric groups (AC-9).
+    // The six metric groups (AC-9 + F10 workload).
     expect(screen.getByTestId('ops-cycle-time')).toBeInTheDocument();
     expect(screen.getByTestId('ops-stp-rate')).toBeInTheDocument();
     expect(screen.getByTestId('ops-fraud-rate')).toBeInTheDocument();
     expect(screen.getByTestId('ops-decisions')).toBeInTheDocument();
     expect(screen.getByTestId('ops-sla')).toBeInTheDocument();
+    expect(screen.getByTestId('ops-workload')).toBeInTheDocument();
 
     // Exact fixture values: p50 54000s = 15.0h, p95 129600s = 36.0h.
     expect(screen.getByTestId('ops-cycle-p50')).toHaveTextContent('15.0h');
@@ -29,6 +30,16 @@ describe('OpsAnalytics', () => {
     // SLA breach rate surfaces per severity (2/7 = 29%).
     expect(screen.getByTestId('ops-sla-elevated')).toHaveTextContent('2 breaches / 7 decided');
     expect(screen.getByTestId('ops-sla-low')).toHaveTextContent('0 breaches / 11 decided');
+    // Workload per adjuster (spec F10): busiest first, exact counts.
+    expect(screen.getByTestId('ops-workload-usr_adj_1')).toHaveTextContent(
+      'maya.adjuster@claimos.example4 open claims'
+    );
+    expect(screen.getByTestId('ops-workload-usr_adj_2')).toHaveTextContent(
+      'omar.adjuster@claimos.example3 open claims'
+    );
+    expect(screen.getByTestId('ops-workload-unassigned')).toHaveTextContent(
+      '2 unassigned open claims'
+    );
   });
 
   it('shows the empty-book notice when nothing has been processed', async () => {
@@ -45,6 +56,7 @@ describe('OpsAnalytics', () => {
               { severity: 'low', slaHours: 48, decided: 0, breaches: 0, breachRate: 0 },
             ],
           },
+          workload: { adjusters: [], unassigned: 0 },
         })
       )
     );
@@ -55,6 +67,11 @@ describe('OpsAnalytics', () => {
       expect(screen.getByTestId('ops-empty')).toBeInTheDocument()
     );
     expect(screen.getByTestId('ops-analytics')).toBeInTheDocument();
+    // The workload card renders its zeroed state alongside the notice.
+    expect(screen.getByTestId('ops-workload')).toHaveTextContent('No active adjusters yet.');
+    expect(screen.getByTestId('ops-workload-unassigned')).toHaveTextContent(
+      '0 unassigned open claims'
+    );
   });
 
   it('shows the error state with a working retry button when the API fails', async () => {
