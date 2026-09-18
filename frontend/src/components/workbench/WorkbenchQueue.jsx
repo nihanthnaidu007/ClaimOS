@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   OctagonAlert,
   RefreshCw,
+  Search,
+  SearchX,
   Timer,
   Wifi,
   WifiOff,
@@ -32,7 +34,10 @@ const SORT_OPTIONS = [
   { value: 'risk', label: 'Risk (highest first)' },
 ];
 
-const INITIAL_FILTERS = { status: '', severity: '', minAgeHours: '', maxAgeHours: '', sort: 'age' };
+const INITIAL_FILTERS = { status: '', severity: '', minAgeHours: '', maxAgeHours: '', sort: 'age', search: '' };
+
+// Search goes out once typing pauses (spec F8 debounced search box).
+const SEARCH_DEBOUNCE_MS = 300;
 
 function LiveIndicator({ status }) {
   const presentation = {
@@ -74,11 +79,22 @@ function SlaBadge({ sla }) {
 export default function WorkbenchQueue() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState(INITIAL_FILTERS);
+  const [searchDraft, setSearchDraft] = useState(''); // live input; `search` follows debounced
   const [rows, setRows] = useState(null); // null = first load in flight
   const [error, setError] = useState(null);
   const [streamStatus, setStreamStatus] = useState('connecting');
   const [reloadKey, setReloadKey] = useState(0);
   const streamDisposeRef = useRef(null);
+
+  // Debounce the search box: the query joins the filter set only after the
+  // user stops typing. A no-op update returns `prev` so filters that did not
+  // change never retrigger the REST load or the SSE stream.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters((prev) => (prev.search === searchDraft ? prev : { ...prev, search: searchDraft }));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [searchDraft]);
 
   const queryParams = useMemo(
     () => ({
@@ -87,6 +103,7 @@ export default function WorkbenchQueue() {
       min_age_hours: filters.minAgeHours || undefined,
       max_age_hours: filters.maxAgeHours || undefined,
       sort: filters.sort,
+      search: filters.search || undefined,
     }),
     [filters]
   );
@@ -131,8 +148,26 @@ export default function WorkbenchQueue() {
     setFilters((prev) => ({ ...prev, [key]: value }));
   }
 
+  function clearSearch() {
+    setSearchDraft('');
+    setFilter('search', ''); // immediate — clearing does not wait for the debounce
+  }
+
   const filterBar = (
     <div className="flex flex-wrap items-center gap-3" data-testid="queue-filters">
+      <label className="text-xs uppercase tracking-wider text-[#8b96ab] font-mono">
+        <Search className="inline w-3 h-3 mr-1" aria-hidden />
+        Search
+        <input
+          type="search"
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
+          placeholder="Claim #, policy #, or customer"
+          data-testid="filter-search"
+          aria-label="Search claims by number, policy, or customer"
+          className="ml-2 w-56 bg-[#0d1119] border border-[#1a1f2e] rounded-md px-2 py-1.5 text-sm text-[#e2e8f0] placeholder:text-[#4a5568] focus:outline-none focus:border-[#3b82f6]"
+        />
+      </label>
       <label className="text-xs uppercase tracking-wider text-[#8b96ab] font-mono">
         Status
         <select
@@ -246,11 +281,28 @@ export default function WorkbenchQueue() {
       )}
 
       {rows !== null && rows.length === 0 && !error && (
-        <div className="mt-10 text-center text-sm text-[#8b96ab]" data-testid="queue-empty">
-          <AlertOctagon className="w-8 h-8 mx-auto mb-3 text-[#4a5568]" aria-hidden />
-          No claims awaiting review.
-          <p className="mt-1 text-xs">New escalations appear here automatically as the pipeline runs.</p>
-        </div>
+        filters.search ? (
+          <div className="mt-10 text-center text-sm text-[#8b96ab]" data-testid="queue-empty-search">
+            <SearchX className="w-8 h-8 mx-auto mb-3 text-[#4a5568]" aria-hidden />
+            No claims match your search.
+            <p className="mt-1 text-xs">Search matches the claim number, policy number, or customer name.</p>
+            <button
+              type="button"
+              onClick={clearSearch}
+              data-testid="clear-search"
+              className="mt-3 inline-flex items-center gap-1.5 text-xs text-[#7cb0ff] underline hover:no-underline"
+            >
+              <Search className="w-3 h-3" aria-hidden />
+              Clear search
+            </button>
+          </div>
+        ) : (
+          <div className="mt-10 text-center text-sm text-[#8b96ab]" data-testid="queue-empty">
+            <AlertOctagon className="w-8 h-8 mx-auto mb-3 text-[#4a5568]" aria-hidden />
+            No claims awaiting review.
+            <p className="mt-1 text-xs">New escalations appear here automatically as the pipeline runs.</p>
+          </div>
+        )
       )}
 
       {rows !== null && rows.length > 0 && (

@@ -106,6 +106,92 @@ describe('WorkbenchQueue', () => {
     });
   });
 
+  it('debounces the search box before sending the search param', async () => {
+    const capturedUrls = [];
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, ({ request }) => {
+        capturedUrls.push(request.url);
+        return HttpResponse.json({
+          rows: workbenchQueueRows,
+          generatedAt: '2026-09-17T10:00:00+00:00',
+        });
+      })
+    );
+    renderQueue();
+    await waitFor(() => expect(capturedUrls.length).toBeGreaterThanOrEqual(1));
+    const requestCountBeforeTyping = capturedUrls.length;
+
+    fireEvent.change(screen.getByTestId('filter-search'), { target: { value: 'grace' } });
+
+    // Debounced: no request goes out while the keystroke is fresh.
+    expect(capturedUrls.length).toBe(requestCountBeforeTyping);
+
+    // Once typing pauses, the query carries the search term.
+    await waitFor(() => {
+      const last = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(last.searchParams.get('search')).toBe('grace');
+    });
+  });
+
+  it('drops the search param when the search box is emptied', async () => {
+    const capturedUrls = [];
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, ({ request }) => {
+        capturedUrls.push(request.url);
+        return HttpResponse.json({
+          rows: workbenchQueueRows,
+          generatedAt: '2026-09-17T10:00:00+00:00',
+        });
+      })
+    );
+    renderQueue();
+    const searchBox = screen.getByTestId('filter-search');
+
+    fireEvent.change(searchBox, { target: { value: 'grace' } });
+    await waitFor(() => {
+      const last = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(last.searchParams.get('search')).toBe('grace');
+    });
+
+    fireEvent.change(searchBox, { target: { value: '' } });
+    await waitFor(() => {
+      const last = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(last.searchParams.get('search')).toBeNull();
+    });
+  });
+
+  it('renders row-shaped skeletons while the queue loads', () => {
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, () => new Promise(() => {})) // never resolves
+    );
+    renderQueue();
+
+    const loading = screen.getByTestId('queue-loading');
+    expect(loading).toHaveAttribute('aria-busy', 'true');
+    expect(loading.children).toHaveLength(4); // skeleton rows at final row height
+    expect(screen.queryByTestId('queue-table')).not.toBeInTheDocument();
+  });
+
+  it('shows the no-matches empty state with a working clear action', async () => {
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, () =>
+        HttpResponse.json({ rows: [], generatedAt: '2026-09-17T10:00:00+00:00' })
+      )
+    );
+    renderQueue();
+    await waitFor(() => expect(screen.getByTestId('queue-empty')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByTestId('filter-search'), { target: { value: 'zzz' } });
+    await waitFor(() => expect(screen.getByTestId('queue-empty-search')).toBeInTheDocument());
+    expect(screen.getByText('No claims match your search.')).toBeInTheDocument();
+    expect(screen.queryByTestId('queue-empty')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('clear-search'));
+    await waitFor(() => expect(screen.getByTestId('queue-empty')).toBeInTheDocument());
+    expect(screen.queryByTestId('queue-empty-search')).not.toBeInTheDocument();
+    expect(screen.getByTestId('filter-search').value).toBe('');
+  });
+
   it('opens the live queue stream with the active filters and reports state', async () => {
     openWorkbenchStream.mockImplementation(({ onStatus }) => {
       onStatus?.('live');
