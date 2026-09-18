@@ -13,18 +13,18 @@ test.skip(
 );
 
 let adjuster;
-let customer;
 let submitted = null;
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ request }) => {
   adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
 });
 
 test('a pipeline that cannot reach its LLM fails visibly, not silently', async ({ page }) => {
-  await uiLogin(page, customer);
+  // The FNOL console is an adjuster surface — the inline policy lookup is
+  // adjuster-only (require_adjuster), so the filer must be an adjuster.
+  await uiLogin(page, adjuster);
   await page.goto('/new-claim');
 
   await page.selectOption('[data-testid="incident-type"]', 'theft');
