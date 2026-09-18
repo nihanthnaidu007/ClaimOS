@@ -259,7 +259,8 @@ class PublicUser(BaseModel):
 class RegisterRequest(BaseModel):
     email: str = Field(max_length=254, pattern=_LOGIN_EMAIL_PATTERN)
     password: str = Field(min_length=PASSWORD_MIN_LENGTH, max_length=PASSWORD_MAX_LENGTH)
-    role: UserRole
+    # No role field: registration is customer-only server-side. Adjuster
+    # accounts are provisioned via the seeded demo credentials.
     inviteCode: str = Field(default="", max_length=200)
 
 
