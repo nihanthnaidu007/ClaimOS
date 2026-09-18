@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import {
   apiLogin,
   authHeaders,
-  registerUser,
   saveEvidence,
+  seededAdjuster,
   waitForTerminal,
   uiLogin,
   POLICY_500_DEDUCTIBLE,
@@ -27,8 +27,8 @@ let claimId = null;
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
+test.beforeAll(async () => {
+  adjuster = seededAdjuster();
 });
 
 test('low-severity clean claim auto-approves through the STP gate', async ({ page, request }) => {

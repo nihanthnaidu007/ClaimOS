@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { apiLogin, registerUser, saveEvidence, waitForTerminal, uiLogin } from './utils';
+import { apiLogin, saveEvidence, seededAdjuster, waitForTerminal, uiLogin } from './utils';
 
 // Forced agent failure: with FIXTURE_FAULT=timeout:intake the backend fixture
 // adapter times out every LLM call; the worker burns the retry budget and
@@ -17,8 +17,8 @@ let submitted = null;
 
 test.describe.configure({ mode: 'serial' });
 
-test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
+test.beforeAll(async () => {
+  adjuster = seededAdjuster();
 });
 
 test('a pipeline that cannot reach its LLM fails visibly, not silently', async ({ page }) => {

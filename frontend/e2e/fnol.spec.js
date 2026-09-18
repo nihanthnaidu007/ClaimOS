@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, saveEvidence, uiLogin, tinyPdf, POLICY_600_DEDUCTIBLE } from './utils';
+import { saveEvidence, seededAdjuster, uiLogin, tinyPdf, POLICY_600_DEDUCTIBLE } from './utils';
 
 // Serial: the upload spec reuses the claim submitted by the happy-path spec.
 test.describe.configure({ mode: 'serial' });
@@ -15,8 +15,8 @@ const DESCRIPTION =
 let user;
 let submittedClaimId = null;
 
-test.beforeAll(async ({ request }) => {
-  user = await registerUser(request);
+test.beforeAll(async () => {
+  user = seededAdjuster();
 });
 
 test('wizard blocks invalid input, resumes drafts, and reports policy misses', async ({

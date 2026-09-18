@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, saveEvidence, uiLogin, POLICY_600_DEDUCTIBLE } from './utils';
+import { saveEvidence, seededAdjuster, uiLogin, POLICY_600_DEDUCTIBLE } from './utils';
 
 // Polling fallback: with the SSE endpoint unreachable from the browser, the
 // pipeline board must still reach a decision — the SSE hook's reconnect
@@ -14,12 +14,12 @@ const DESCRIPTION =
 
 let user;
 
-test.beforeAll(async ({ request }) => {
+test.beforeAll(async () => {
   // Adjuster, not customer: the wizard's live policy lookup is adjuster-only
   // (holder PII is not enumerable by policy number), so a customer account
   // cannot pass the policy-holder step. Customer surfaces are the status
   // portal and API-level submissions, covered elsewhere.
-  user = await registerUser(request, { role: 'adjuster' });
+  user = seededAdjuster();
 });
 
 test('the board finalizes through polling when the event stream is blocked', async ({

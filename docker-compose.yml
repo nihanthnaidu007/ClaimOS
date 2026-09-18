@@ -26,6 +26,11 @@ services:
       INVITE_CODE: ${INVITE_CODE:-}
       LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5/minute}
       STATUS_LOOKUP_RATE_LIMIT: ${STATUS_LOOKUP_RATE_LIMIT:-60/minute}
+      # Seeded demo accounts (an empty value skips the role): the E2E suite
+      # signs adjusters in from this account — public registration is
+      # customer-only. Defaults match frontend/e2e/utils.js seededAdjuster.
+      DEMO_ADJUSTER_EMAIL: ${DEMO_ADJUSTER_EMAIL:-adjuster-e2e@claimos.dev}
+      DEMO_ADJUSTER_PASSWORD: ${DEMO_ADJUSTER_PASSWORD:-e2e-Adjuster!42}
     volumes:
       - uploads:/data/uploads
     ports:

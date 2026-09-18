@@ -4,6 +4,7 @@ import {
   authHeaders,
   registerUser,
   saveEvidence,
+  seededAdjuster,
   submitClaim,
   theftClaim,
   waitForTerminal,
@@ -36,8 +37,8 @@ let claimId = null;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
+  adjuster = seededAdjuster();
+  customer = await registerUser(request);
 
   const custToken = (await apiLogin(request, customer)).token;
   const submitted = await submitClaim(
