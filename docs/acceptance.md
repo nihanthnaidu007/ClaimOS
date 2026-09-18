@@ -76,6 +76,18 @@ Wave-2 acceptance criteria (Feature F2 spec, `art_442ZCjeO`) are covered on `fea
 
 All copy lives in the single `PORTAL_STAGE_COPY` constant (`backend/app/status_portal.py`); no agent/LLM output is ever quoted to the customer.
 
+## Feature wave 2 — workbench saved views + bulk actions (F12)
+
+Wave-2 acceptance criteria (Feature F12 spec, `art_442ZCjeO`) are covered on `feat/workbench-views-bulk`:
+
+| AC | Criterion | Proven by |
+|---|---|---|
+| AC-12.1 | Saved views: `workbench_views` collection (`{owner_id, name, filters_json, created_at}`) with save/list/apply/delete endpoints, private to their owner | `backend/tests/test_workbench_views_bulk.py::test_save_list_and_apply_view_round_trip`, `::test_view_apply_404s_for_other_owners_and_missing`, `::test_views_reject_unknown_filters_and_blank_names`, `::test_saving_the_same_name_replaces_the_preset`, `::test_views_require_authentication`; RTL: `WorkbenchQueue.test.jsx` "saves the current filters as a named view…", "applies a saved view…", "deletes a saved view…" |
+| AC-12.2 | Bulk reassign + flag-for-review over multi-select: N-claim confirmation, one audit entry per touched claim (bulk = a loop of audited single actions), per-claim outcomes with partial failures surfaced, never silently dropped | `backend/tests/test_workbench_views_bulk.py::test_bulk_reassign_is_a_loop_of_per_claim_audits`, `::test_bulk_flag_appends_flags_with_per_claim_audits`, `::test_bulk_partial_failure_reports_per_claim_and_keeps_auditing_rest`, `::test_bulk_duplicate_claim_ids_apply_once`, `::test_bulk_reassign_requires_existing_adjuster_target`, `::test_bulk_rejects_empty_ids_and_missing_reason`, `::test_bulk_endpoint_is_adjuster_gated`; RTL: `WorkbenchQueue.test.jsx` bulk-action block + `BulkActionModal.test.jsx` (confirmation/disabled state, payloads, per-claim failure render) |
+| AC-12.3 | Queue surfaces: bulk bar on selection, per-claim review-flag badge, saved-view chips; adjuster-flow dogfood evidence | RTL tests above plus dogfood captures `tc-9-bulk-flag-before.png` / `tc-9-bulk-flag-after.png` / `tc-9-bulk-interaction.webm` and `tc-10-saved-views.png` against the tested head SHA |
+
+F12 adds 13 backend tests (suite: 431 green) and 18 frontend tests (suite: 156 green in 20 files).
+
 ## Known gaps / deferred
 
 | Gap | Why | Owner |
