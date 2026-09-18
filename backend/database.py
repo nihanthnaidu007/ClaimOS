@@ -35,6 +35,10 @@ letter_templates_col = db.letter_templates
 # Saved workbench views (spec F12): one adjuster's named queue-filter presets.
 # Views are private to their owner — every read is scoped by owner_id.
 workbench_views_col = db.workbench_views
+
+# Adjuster <-> customer claim message threads (F5): append-only conversation.
+claim_messages_col = db.claim_messages
+
 SEED_MARKER_ID = "seed:v1"
 
 SEED_POLICIES = [
@@ -238,6 +242,8 @@ async def seed_database():
     await audit_log_col.create_index("claim_id")
     await audit_log_col.create_index("at")
     await events_col.create_index([("claim_id", 1), ("seq", 1)], unique=True)
+
+    await claim_messages_col.create_index([("claim_id", 1), ("created_at", 1)])
     # claim_runs: one doc per run attempt; {claim_id, attempt} unique so a
     # concurrent enqueue can never create two runs with the same attempt, and
     # {status, created_at} backs the worker's atomic queue-claim query.

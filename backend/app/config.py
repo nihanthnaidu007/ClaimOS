@@ -85,6 +85,11 @@ class Settings(BaseSettings):
     # triggers a real email (address-harvesting / mail-bomb vector).
     access_code_recovery_rate_limit: str = "3/minute"
 
+    # F5 claim messaging: portal send/list rate limit (own constant, per
+    # client IP) and the plain-text body cap enforced in app.claim_messages.
+    portal_message_rate_limit: str = "10/minute"
+    claim_message_max_chars: int = 2000
+
     # ---- Email delivery (F1) ----
     # Customer-email channel: "console" logs structured events (the dev/CI
     # default — byte-identical to the pre-email behavior); "smtp" delivers

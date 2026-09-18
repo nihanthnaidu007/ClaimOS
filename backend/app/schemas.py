@@ -592,6 +592,8 @@ class StatusLookupResponse(BaseModel):
     """Masked portal payload: first name + claim status are the only identity
     data; amounts, contact details, and policy numbers never appear."""
 
+    messagesEnabled: bool = True  # F5: portal thread surface
+
     claimNumber: str
     firstName: str = ""
     status: str
@@ -700,3 +702,43 @@ class LetterPreviewResponse(BaseModel):
     subject: str
     body: str
     warnings: list[str] = []
+
+
+class MessageRequest(BaseModel):
+    """Adjuster message send: the body only; the author comes from the token."""
+
+    body: str
+
+
+class PortalCredentialsRequest(BaseModel):
+    """Access-code credential for portal thread reads (nothing to send)."""
+
+    accessCode: str
+
+
+class PortalMessageRequest(PortalCredentialsRequest):
+    """Customer portal message send: access code + body in one payload, so
+    the code never rides a URL."""
+
+    body: str
+
+
+class MessageItem(BaseModel):
+    """One thread message, camelCase for the frontend."""
+
+    id: str
+    claimId: str
+    authorRole: str
+    authorId: str = ""
+    body: str
+    createdAt: str
+    readAt: str | None = None
+
+
+class MessageListResponse(BaseModel):
+    claimId: str
+    messages: list[MessageItem] = []
+
+
+class MessageSendResponse(BaseModel):
+    message: MessageItem
