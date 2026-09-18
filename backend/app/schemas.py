@@ -11,6 +11,8 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.portal_projection import CustomerDecisionSummary, CustomerStageSummary
+
 # Accepts empty string (frontend sends it for optional emails) or a minimal
 # name@domain.tld shape. Full deliverability is out of scope here.
 _EMAIL_PATTERN = r"^$|^[^@\s]+@[^@\s]+\.[^@\s]+$"
@@ -447,6 +449,13 @@ class StatusLookupResponse(BaseModel):
     # beats an empty string or a fabricated date.
     nextSteps: list[str] = []
     expectedResolution: Optional[str] = None
+    # F6 decision transparency — the deny-by-default projection's output:
+    # pre-written stage summaries and, on decided claims only, the decision's
+    # plain-language summary + customer-safe citations. Internal trace data
+    # (fraud scores, similar-incident matches, thresholds, model metadata,
+    # notes) has no path into these models — see app/portal_projection.py.
+    stageSummaries: list[CustomerStageSummary] = []
+    decision: Optional[CustomerDecisionSummary] = None
 
 
 class StatusLetterResponse(BaseModel):
