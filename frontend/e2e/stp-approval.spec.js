@@ -6,6 +6,7 @@ import {
   saveEvidence,
   waitForTerminal,
   uiLogin,
+  POLICY_500_DEDUCTIBLE,
 } from './utils';
 
 // STP straight-through path: a low-severity, clean, high-confidence claim is
@@ -14,23 +15,30 @@ import {
 // record reads auto_approved, and the adjuster surface carries the portal
 // access code.
 
-const POLICY_NUMBER = 'AUTO-2024-001847'; // seeded: active, theft covered, $50k limit, $500 deductible
+const POLICY_NUMBER = POLICY_500_DEDUCTIBLE; // seeded: active, theft covered, $50k limit, $500 deductible.
+// Only agent-failure shares this policy (CI runs it first), so this claim is
+// the 2nd in 12mo — the 3+ frequency flag stays quiet and the gate can
+// auto-approve (see utils.js for the full distribution).
 const DESCRIPTION =
   'Bicycle stolen overnight from the apartment bike room; police report case 26-44112 filed the same morning.';
 
 let adjuster;
-let customer;
 let claimId = null;
 
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ request }) => {
   adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
 });
 
 test('low-severity clean claim auto-approves through the STP gate', async ({ page, request }) => {
-  await uiLogin(page, customer);
+  // The wizard's policy-holder step requires a live /policies/lookup verdict,
+  // and that endpoint is adjuster-only by design (holder PII is not
+  // enumerable by policy number). FNOL through the console is an adjuster
+  // action — the customer path is the status portal, covered in
+  // status-portal.spec.js, and API-level customer submissions are covered in
+  // override.spec.js.
+  await uiLogin(page, adjuster);
   await page.goto('/new-claim');
 
   await page.selectOption('[data-testid="incident-type"]', 'theft');
@@ -80,10 +88,11 @@ test('the finalized claim shows in the workbench with its portal access code', a
   expect(claimId, 'STP test must have submitted a claim').toBeTruthy();
   await uiLogin(page, adjuster);
   await page.goto('/workbench');
-  await expect(page.getByTestId('workbench-view')).toBeVisible({ timeout: 30_000 });
-
-  const row = page.getByTestId(`queue-row-${claimId}`);
-  await expect(row).toBeVisible({ timeout: 30_000 });
+  // The queue lists REVIEWABLE claims only (escalated/pending/under_review) —
+  // an auto-approved claim is decided, so by design it never gets a row here.
+  // What the adjuster surface must carry is the finalized case itself with
+  // its portal access code, which lives on the claim detail page.
+  await expect(page.getByTestId('workbench-queue')).toBeVisible({ timeout: 30_000 });
 
   await page.goto(`/claims/${claimId}`);
   await expect(page.getByTestId('claim-detail')).toBeVisible();

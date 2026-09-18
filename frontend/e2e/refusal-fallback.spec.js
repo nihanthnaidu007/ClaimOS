@@ -8,6 +8,7 @@ import {
   theftClaim,
   waitForTerminal,
   uiLogin,
+  POLICY_600_DEDUCTIBLE,
 } from './utils';
 
 // Refusal recovery (PR #27): the decision agent retries a refused LLM call
@@ -39,7 +40,14 @@ test.beforeAll(async ({ request }) => {
   customer = await registerUser(request, { role: 'customer' });
 
   const custToken = (await apiLogin(request, customer)).token;
-  const submitted = await submitClaim(request, custToken, theftClaim({ incidentDate: '2026-09-08' }));
+  const submitted = await submitClaim(
+    request,
+    custToken,
+    // 008899: refusal must land as 2nd claim on its policy — the eligibility
+    // frequency rule (+25 risk at 3+/12mo, self included) would tip the
+    // rescued run out of auto_approved on a busier slate (see utils.js).
+    theftClaim({ incidentDate: '2026-09-08', policyNumber: POLICY_600_DEDUCTIBLE })
+  );
   claimId = submitted.claimId;
 
   const adjToken = (await apiLogin(request, adjuster)).token;

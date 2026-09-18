@@ -67,11 +67,26 @@ export async function apiLogin(request, { email, password }) {
   return { token: body.accessToken, user: body.user };
 }
 
-const SEED_POLICY = 'AUTO-2024-001847'; // active, theft/accident/fire, $50k limit, $500 deductible
+// Seeded AUTO policies, one constant per deductible so payout assertions
+// stay traceable to the policy a spec chose. The eligibility stage adds +25
+// risk ("3+ claims on this policy in the past 12 months") once a policy
+// carries 3 claims in a year, counting the claim under evaluation — the
+// suite submits ~7 pipeline claims, so approval-asserting specs must spread
+// across policies. Assignment (files run alphabetically: agent-failure,
+// fnol, override, refusal-fallback, sse-fallback, status-portal,
+// stp-approval; agent-failure and refusal-fallback are CI-only):
+//
+//   AUTO-2024-001847 ($500 ded): agent-failure, stp-approval   -> stp is 2nd, clean
+//   AUTO-2024-008899 ($600 ded): fnol, refusal-fallback, sse   -> refusal 2nd, clean;
+//                                                                  sse is 3rd but only asserts completion
+//   AUTO-2024-012001 ($400 ded): override, status-portal       -> portal 2nd, clean
+export const POLICY_500_DEDUCTIBLE = 'AUTO-2024-001847'; // $50k limit, theft/accident/vandalism/weather
+export const POLICY_600_DEDUCTIBLE = 'AUTO-2024-008899'; // $45k limit, adds hit_and_run
+export const POLICY_400_DEDUCTIBLE = 'AUTO-2024-012001'; // $60k limit, adds total_loss
 
 export function theftClaim(over = {}) {
   return {
-    policyNumber: SEED_POLICY,
+    policyNumber: POLICY_500_DEDUCTIBLE,
     holderName: 'Dana Whitfield',
     // Fixed past date: incident fingerprints are (policy, date, type), so a
     // per-run "today" would collide with anything reusing the builder on the

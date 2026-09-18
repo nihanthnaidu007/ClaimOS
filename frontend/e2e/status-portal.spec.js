@@ -6,6 +6,7 @@ import {
   submitClaim,
   theftClaim,
   waitForTerminal,
+  POLICY_400_DEDUCTIBLE,
 } from './utils';
 
 // Public status portal: claim number + access code is the only credential.
@@ -13,7 +14,7 @@ import {
 // customer-facing messages, and a successful lookup shows the live timeline.
 
 const UNIFORM_MISS =
-  'Lookup failed. Please check your details and try again.';
+  'No claim found for that claim number and access code. Double-check both values — the code is case-sensitive.';
 
 let claim = null;
 
@@ -22,7 +23,14 @@ test.beforeAll(async ({ request }) => {
   const customer = await registerUser(request, { role: 'customer' });
 
   const custToken = (await apiLogin(request, customer)).token;
-  claim = await submitClaim(request, custToken, theftClaim({ incidentDate: '2026-09-12' }));
+  claim = await submitClaim(
+    request,
+    custToken,
+    // 012001: portal claim must auto-approve (badge /approved/i), so it lands
+    // as 2nd claim on its policy — the frequency rule (+25 risk at 3+/12mo,
+    // self included) stays quiet (see utils.js).
+    theftClaim({ incidentDate: '2026-09-12', policyNumber: POLICY_400_DEDUCTIBLE })
+  );
 
   const adjToken = (await apiLogin(request, adjuster)).token;
   await waitForTerminal(request, adjToken, claim.claimId);
@@ -32,9 +40,11 @@ test('unknown claim and wrong code render the same uniform error', async ({ page
   await page.goto('/status');
   await expect(page.getByTestId('status-portal')).toBeVisible();
 
-  // Unknown claim number.
+  // Unknown claim number. The code meets the 16-char schema minimum so the
+  // request reaches the handler and 404s there instead of 422ing on
+  // validation — uniformity must hold at the lookup, not the front door.
   await page.fill('[data-testid="status-claim-input"]', 'CLM-19700101-000');
-  await page.fill('[data-testid="status-code-input"]', 'whatever-code');
+  await page.fill('[data-testid="status-code-input"]', 'whatever-code-at-least-16');
   await page.getByTestId('status-lookup-submit').click();
   await expect(page.getByTestId('status-lookup-error')).toHaveText(UNIFORM_MISS);
 

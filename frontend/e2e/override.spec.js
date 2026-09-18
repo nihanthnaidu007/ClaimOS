@@ -8,6 +8,7 @@ import {
   accidentClaim,
   waitForTerminal,
   uiLogin,
+  POLICY_400_DEDUCTIBLE,
 } from './utils';
 
 // Adjuster override path: an escalated claim (STP gate refused
@@ -27,8 +28,14 @@ test.beforeAll(async ({ request }) => {
 
   // $4,200 accident -> elevated severity -> the STP gate refuses
   // straight-through -> the run escalates -> the claim is reviewable.
+  // 012001: keeps this claim off 001847/008899 so those slates stay under the
+  // 3+ claims/12mo frequency flag for the approval-asserting specs (utils.js).
   const custToken = (await apiLogin(request, customer)).token;
-  const submitted = await submitClaim(request, custToken, accidentClaim({ incidentDate: '2026-09-13' }));
+  const submitted = await submitClaim(
+    request,
+    custToken,
+    accidentClaim({ incidentDate: '2026-09-13', policyNumber: POLICY_400_DEDUCTIBLE })
+  );
   claimId = submitted.claimId;
 
   const adjToken = (await apiLogin(request, adjuster)).token;

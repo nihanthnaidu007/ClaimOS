@@ -1,10 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, saveEvidence, uiLogin, tinyPdf } from './utils';
+import { registerUser, saveEvidence, uiLogin, tinyPdf, POLICY_600_DEDUCTIBLE } from './utils';
 
 // Serial: the upload spec reuses the claim submitted by the happy-path spec.
 test.describe.configure({ mode: 'serial' });
 
-const POLICY_NUMBER = 'AUTO-2024-001847'; // seeded active policy
+// 008899 ($600 deductible): the frequency rule escalates policies carrying
+// 3+ claims/12mo (see utils.js) — fnol shares it with refusal-fallback/sse
+// and asserts decision persistence, not a verdict, so the slate stays clean
+// for refusal's auto-approval assertions.
+const POLICY_NUMBER = POLICY_600_DEDUCTIBLE;
 const DESCRIPTION =
   'Rear-ended at a stop light on Route 9; bumper damage and the trunk will not close.';
 

@@ -39,6 +39,9 @@ test('a pipeline that cannot reach its LLM fails visibly, not silently', async (
   await page.fill('[data-testid="holder-name"]', 'Dana Whitfield');
   await page.fill('[data-testid="holder-email"]', 'dana.whitfield@example.com');
   await page.selectOption('[data-testid="incident-role"]', 'policyholder');
+  // 001847: this spec runs FIRST in CI (alphabetical) with FIXTURE_FAULT
+  // set, so its claim is the policy's 1st of the suite; stp-approval later
+  // relies on being only the 2nd (see utils.js).
   await page.fill('[data-testid="policy-number-input"]', 'AUTO-2024-001847');
   await expect(page.getByTestId('policy-found-panel')).toBeVisible({ timeout: 20_000 });
   await page.getByTestId('wizard-next-btn').click();

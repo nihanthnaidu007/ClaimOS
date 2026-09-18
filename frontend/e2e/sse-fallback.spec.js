@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, saveEvidence, uiLogin } from './utils';
+import { registerUser, saveEvidence, uiLogin, POLICY_600_DEDUCTIBLE } from './utils';
 
 // Polling fallback: with the SSE endpoint unreachable from the browser, the
 // pipeline board must still reach a decision — the SSE hook's reconnect
@@ -7,14 +7,19 @@ import { registerUser, saveEvidence, uiLogin } from './utils';
 // arrives without the stream — and the connection chip must report the
 // degraded state instead of pretending to be live.
 
-const POLICY_NUMBER = 'AUTO-2024-001847';
+const POLICY_NUMBER = POLICY_600_DEDUCTIBLE; // 3rd claim on this policy: frequency-flagged, but this
+// spec only asserts the board finalizes, not the verdict (see utils.js).
 const DESCRIPTION =
   'Bicycle stolen overnight from the apartment bike room; police report case 26-44112 filed the same morning.';
 
 let user;
 
 test.beforeAll(async ({ request }) => {
-  user = await registerUser(request, { role: 'customer' });
+  // Adjuster, not customer: the wizard's live policy lookup is adjuster-only
+  // (holder PII is not enumerable by policy number), so a customer account
+  // cannot pass the policy-holder step. Customer surfaces are the status
+  // portal and API-level submissions, covered elsewhere.
+  user = await registerUser(request, { role: 'adjuster' });
 });
 
 test('the board finalizes through polling when the event stream is blocked', async ({
