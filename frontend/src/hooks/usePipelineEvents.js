@@ -16,6 +16,10 @@ import { getAccessToken } from '@/lib/api';
 const BACKEND_URL = import.meta.env.VITE_API_BASE_URL;
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 15_000;
+// Bounded reconnects: the server closes the stream only after a terminal
+// event, so a reconnect loop against a finished claim eventually exhausts
+// this budget and parks the connection as offline instead of spinning.
+const MAX_CONNECT_ATTEMPTS = 8;
 
 // Full jitter (uniform in [0, cap]) — spread reconnects instead of stampeding.
 export function backoffDelay(attempt, random = Math.random) {
@@ -89,6 +93,11 @@ export function usePipelineEvents({
   const [connectionState, setConnectionState] = useState('connecting');
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
+  // Callers pass array literals (e.g. `['claims']`) whose identity changes on
+  // every render; keying the effect on that identity would tear down and
+  // reopen the live stream on each re-render. Ref like onEvent.
+  const invalidateRef = useRef(invalidateOnReconnect);
+  invalidateRef.current = invalidateOnReconnect;
   const lastEventIdRef = useRef(null);
 
   useEffect(() => {
@@ -98,6 +107,12 @@ export function usePipelineEvents({
     let stopped = false;
     let timer = null;
     let attempt = 0;
+
+    const invalidate = () => {
+      for (const prefix of invalidateRef.current) {
+        queryClient.invalidateQueries({ queryKey: [...prefix, claimId] });
+      }
+    };
 
     const connect = async () => {
       setConnectionState(attempt === 0 ? 'connecting' : 'reconnecting');
@@ -137,16 +152,23 @@ export function usePipelineEvents({
           }
         }
 
-        // The server closes the stream after a terminal event — that is a
-        // normal end, not a failure.
-        if (!stopped) setConnectionState('offline');
+        // The server closes the stream only after a terminal event — a normal
+        // end, not a failure. Refetch server truth so the decision renders
+        // even if the terminal frame itself was lost mid-teardown, then stop:
+        // reconnecting would replay the terminal event and close again.
+        if (!stopped) {
+          setConnectionState('offline');
+          invalidate();
+        }
       } catch {
         if (stopped || controller.signal.aborted) return;
         attempt += 1;
-        setConnectionState('reconnecting');
-        for (const prefix of invalidateOnReconnect) {
-          queryClient.invalidateQueries({ queryKey: [...prefix, claimId] });
+        if (attempt > MAX_CONNECT_ATTEMPTS) {
+          setConnectionState('offline');
+          return;
         }
+        setConnectionState('reconnecting');
+        invalidate();
         timer = setTimeout(connect, backoffDelay(attempt));
       }
     };
@@ -158,7 +180,11 @@ export function usePipelineEvents({
       controller.abort();
       if (timer) clearTimeout(timer);
     };
-  }, [claimId, enabled, queryClient, invalidateOnReconnect]);
+    // invalidateOnReconnect and onEvent are read through refs (callers pass
+    // fresh array/function literals each render); re-keying the effect on
+    // them would abort the live stream on every re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claimId, enabled, queryClient]);
 
   return { connectionState };
 }

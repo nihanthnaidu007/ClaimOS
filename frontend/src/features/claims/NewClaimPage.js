@@ -59,8 +59,10 @@ export default function NewClaimPage() {
   const record = claimQuery.data;
 
   const pipeline = pipelineQuery.data || INITIAL_PIPELINE_STATE;
-  const decisionReady =
-    record && TERMINAL_STATUSES.includes(record.status) && pipeline.status !== 'running';
+  // The claim record is server truth: once it reports a terminal status the
+  // run is over, even if the client board missed the terminal SSE frame
+  // (streams can drop mid-event; the refetch on stream close covers it).
+  const decisionReady = record && TERMINAL_STATUSES.includes(record.status);
 
   const handleSubmit = useCallback(
     async (draft, files) => {
