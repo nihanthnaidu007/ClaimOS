@@ -13,6 +13,9 @@ const STATUS_TONES = {
   failed: 'border-[#ef4444]/40 bg-[#ef4444]/10 text-[#ef4444]',
   escalated: 'border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[#f59e0b]',
   pending: 'border-[#3b82f6]/40 bg-[#3b82f6]/10 text-[#60a5fa]',
+  // F14 reopen flow: back under human review, or a second decision on record.
+  reopened: 'border-[#f59e0b]/40 bg-[#f59e0b]/10 text-[#f59e0b]',
+  overridden: 'border-[#7c3aed]/40 bg-[#7c3aed]/10 text-[#b79df5]',
 };
 
 const statusTone = (status) =>
@@ -33,7 +36,7 @@ const formatWhen = (iso) => {
 };
 
 export default function StatusTimeline({ status, onDownloadLetter, downloading }) {
-  const { claimNumber, statusLabel, status: statusKey, currentStage, decisionReady, pdfAvailable, milestones } = status;
+  const { claimNumber, statusLabel, status: statusKey, statusNote, decisionOutcome, currentStage, decisionReady, pdfAvailable, milestones } = status;
   const doneCount = milestones.filter((m) => m.done).length;
 
   return (
@@ -52,6 +55,23 @@ export default function StatusTimeline({ status, onDownloadLetter, downloading }
           {statusLabel}
         </span>
       </div>
+
+      {/* F14: customer-facing review-again note, only while reopened. */}
+      {statusNote && (
+        <p data-testid="status-note" className="mb-6 border border-[#f59e0b]/30 bg-[#f59e0b]/5 px-4 py-3 text-sm text-[#e2e8f0]">
+          {statusNote}
+        </p>
+      )}
+
+      {/* F14: the outcome of record — a second (override) decision replaces the pipeline verdict. */}
+      {decisionOutcome && (
+        <div className="mb-6 flex items-center justify-between gap-3 border border-[#1a1f2e] bg-[#0d1119] px-4 py-3">
+          <span className="text-xs uppercase tracking-wider text-[#8892a4] font-mono">Current decision</span>
+          <span data-testid="decision-outcome" className="text-sm font-medium text-[#e2e8f0] capitalize">
+            {decisionOutcome}
+          </span>
+        </div>
+      )}
 
       {currentStage && (
         <div
