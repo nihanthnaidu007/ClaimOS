@@ -129,5 +129,6 @@ export function viewPresetToFilters(preset) {
     minAgeHours: preset.min_age_hours ?? '',
     maxAgeHours: preset.max_age_hours ?? '',
     sort: preset.sort ?? 'age',
+    search: preset.search ?? '',
   };
 }

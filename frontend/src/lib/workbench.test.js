@@ -90,6 +90,7 @@ describe('saved-view filter mapping (F12)', () => {
       minAgeHours: 4,
       maxAgeHours: '',
       sort: 'risk',
+      search: '',
     });
     expect(filtersToViewPreset(filters)).toEqual(preset);
   });

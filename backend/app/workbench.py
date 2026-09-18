@@ -166,10 +166,10 @@ _LIST_FIELDS = frozenset({"fraud_flags", "flags"})
 # surface. Unknown keys are rejected on save (strict write, lenient read) so a
 # stale client can never plant a filter the queue silently ignores.
 VIEW_FILTER_KEYS = frozenset(
-    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction"}
+    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search"}
 )
 
-_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction"})
+_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search"})
 _VIEW_NUMBER_FILTERS = frozenset({"min_age_hours", "max_age_hours"})
 
 
