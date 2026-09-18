@@ -6,6 +6,15 @@ call the LLM. The override endpoint is the workbench's one write path: it
 requires a reason (422 without one), stamps the claim, and appends an
 immutable audit_log entry.
 
+Spec F12 adds two more write surfaces, both audit-first:
+- Saved views (`workbench_views`): named queue-filter presets, private to
+  their owner — every read is scoped by owner_id, and delete/apply 404 other
+  owners' views without leaking that they exist.
+- Bulk actions (`POST /claims/bulk`): reassign or flag-for-review applied as
+  a loop of audited single actions — every touched claim gets its own
+  audit_log entry, and per-claim failures are reported in the response
+  instead of being silently dropped.
+
 Collections are read through the `database` module at call time (not imported
 at module load) so test patching and multi-process deployments both bind
 correctly — the same pattern app.auth_store uses.
@@ -18,26 +27,34 @@ import secrets
 from datetime import datetime, timezone
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import database
 from app.config import settings
 from app.deps import UserRecord, require_adjuster
 from app.events import emit_event, get_claim_events
+from app.rate_limit import limiter
 from app.schemas import (
     AuditEntry,
+    BulkActionRequest,
+    BulkActionResponse,
+    BulkActionResultItem,
     CaseSummaryResponse,
     OverrideRequest,
     OverrideResponse,
+    SavedViewApplyResponse,
+    SavedViewCreate,
+    SavedViewOut,
     WorkbenchQueueResponse,
 )
 from app.workbench import (
     REVIEWABLE_STATUSES,
     DECIDED_STATUSES,
+    VIEW_FILTER_KEYS,
     build_case_summary,
     matches_search,
-    queue_row,
+    normalize_view_filters,    queue_row,
 )
 
 logger = structlog.get_logger("claimos.workbench")
@@ -341,3 +358,276 @@ async def get_claim_audit(claim_id: str):
         .limit(200)
     )
     return await cursor.to_list(200)
+
+# ============ SAVED VIEWS (spec F12) ============
+
+
+def _view_out(doc: dict) -> SavedViewOut:
+    """Stored view doc -> response model (filters_json parsed for the client)."""
+    try:
+        filters = json.loads(doc.get("filters_json") or "{}")
+    except ValueError:
+        filters = {}
+    return SavedViewOut(
+        id=doc.get("id", ""),
+        name=doc.get("name", ""),
+        filters=filters if isinstance(filters, dict) else {},
+        owner_id=doc.get("owner_id", ""),
+        createdAt=doc.get("created_at", ""),
+    )
+
+
+@router.post("/views", response_model=SavedViewOut, status_code=201)
+@limiter.limit("30/minute")
+async def save_view(
+    request: Request,
+    body: SavedViewCreate,
+    adjuster: UserRecord = Depends(require_adjuster),
+):
+    """Save the caller's queue filters under a name (owner-private).
+
+    Saving the same name twice replaces the stored preset — a view is a
+    bookmark, not an event log, so re-saving converges instead of forking
+    (the unique (owner_id, name) index backs this).
+    """
+    try:
+        cleaned = normalize_view_filters(body.filters)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    now = _now_iso()
+    existing = await database.workbench_views_col.find_one(
+        {"owner_id": adjuster.id, "name": body.name}, {"_id": 0}
+    )
+    if existing:
+        await database.workbench_views_col.update_one(
+            {"id": existing["id"]},
+            {"$set": {"filters_json": json.dumps(cleaned), "updated_at": now}},
+        )
+        existing["filters_json"] = json.dumps(cleaned)
+        return _view_out(existing)
+
+    doc = {
+        "id": f"vw_{secrets.token_hex(6)}",
+        "owner_id": adjuster.id,
+        "name": body.name,
+        "filters_json": json.dumps(cleaned),
+        "created_at": now,
+    }
+    await database.workbench_views_col.insert_one(doc.copy())
+    doc.pop("_id", None)
+    logger.info("workbench_view_saved owner=%s name=%s", adjuster.email, body.name)
+    return _view_out(doc)
+
+
+@router.get("/views", response_model=list[SavedViewOut])
+async def list_views(adjuster: UserRecord = Depends(require_adjuster)):
+    """The caller's own views, newest first. Owner-scoped by construction."""
+    docs = (
+        await database.workbench_views_col.find(
+            {"owner_id": adjuster.id}, {"_id": 0}
+        )
+        .sort("created_at", -1)
+        .to_list(200)
+    )
+    return [_view_out(doc) for doc in docs]
+
+
+@router.delete("/views/{view_id}")
+async def delete_view(view_id: str, adjuster: UserRecord = Depends(require_adjuster)):
+    """Delete one of the caller's views. Another owner's view is a 404 —
+    scoped by owner_id so existence is never leaked across accounts."""
+    result = await database.workbench_views_col.delete_one(
+        {"id": view_id, "owner_id": adjuster.id}
+    )
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="View not found")
+    return {"deleted": True, "id": view_id}
+
+
+@router.get("/views/{view_id}/apply", response_model=SavedViewApplyResponse)
+async def apply_view(view_id: str, adjuster: UserRecord = Depends(require_adjuster)):
+    """Run the queue machinery over a view's stored filters (owner-scoped)."""
+    doc = await database.workbench_views_col.find_one(
+        {"id": view_id, "owner_id": adjuster.id}, {"_id": 0}
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="View not found")
+
+    view = _view_out(doc)
+    try:
+        stored = json.loads(doc.get("filters_json") or "{}")
+        if not isinstance(stored, dict):
+            raise ValueError("filters must be an object")
+        # Lenient on read: save-time normalization already rejects unknown
+        # keys; a corrupt legacy doc degrades to the default queue instead of
+        # a 500, and the warning makes the degradation visible.
+        cleaned = normalize_view_filters(stored)
+    except ValueError:
+        logger.warning("workbench_view_filters_invalid view_id=%s", view_id)
+        cleaned = {}
+
+    params = QueueParams(**{k: cleaned[k] for k in cleaned if k in VIEW_FILTER_KEYS})
+    rows = await load_queue_rows(params)
+    return {"view": view, "rows": rows, "generatedAt": _now_iso()}
+
+
+# ============ BULK ACTIONS (spec F12) ============
+
+
+class _BulkClaimError(Exception):
+    """One claim's bulk step failed; `detail` is the per-claim outcome text."""
+
+    def __init__(self, detail: str):
+        super().__init__(detail)
+        self.detail = detail
+
+
+async def _bulk_reassign_one(
+    claim_id: str, target: dict, adjuster: UserRecord, reason: str, at: str
+) -> dict:
+    """Reassign one claim to a validated adjuster; one audit entry, one event."""
+    claim = await database.claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise _BulkClaimError("Claim not found")
+
+    before_assignee = claim.get("assignee_id") or ""
+    audit_entry = await _append_audit_entry(
+        {
+            "claim_id": claim_id,
+            "actor": adjuster.id,
+            "actor_email": adjuster.email,
+            "action": "reassign",
+            "before": {"assignee_id": before_assignee},
+            "after": {"assignee_id": target["id"], "assignee_email": target["email"]},
+            "reason": reason,
+            "at": at,
+        }
+    )
+    await database.claims_col.update_one(
+        {"id": claim_id},
+        {
+            "$set": {
+                "assignee_id": target["id"],
+                "assignee_email": target["email"],
+                "updated_at": at,
+            }
+        },
+    )
+    await emit_event(
+        claim_id,
+        {
+            "event": "claim_reassigned",
+            "assigneeId": target["id"],
+            "assigneeEmail": target["email"],
+            "actor": adjuster.email,
+            "reason": reason,
+            "at": at,
+        },
+    )
+    return audit_entry
+
+
+async def _bulk_flag_one(
+    claim_id: str, adjuster: UserRecord, reason: str, at: str
+) -> dict:
+    """Flag one claim for review; one audit entry, one event."""
+    claim = await database.claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise _BulkClaimError("Claim not found")
+
+    existing_flags = claim.get("flags") or []
+    flag = {"reason": reason, "flagged_by": adjuster.email, "flagged_at": at}
+    audit_entry = await _append_audit_entry(
+        {
+            "claim_id": claim_id,
+            "actor": adjuster.id,
+            "actor_email": adjuster.email,
+            "action": "flag_for_review",
+            "before": {"flagged": bool(existing_flags)},
+            "after": {"flagged": True, "flag": flag},
+            "reason": reason,
+            "at": at,
+        }
+    )
+    await database.claims_col.update_one(
+        {"id": claim_id}, {"$push": {"flags": flag}, "$set": {"updated_at": at}}
+    )
+    await emit_event(
+        claim_id,
+        {
+            "event": "claim_flagged",
+            "reason": reason,
+            "actor": adjuster.email,
+            "at": at,
+        },
+    )
+    return audit_entry
+
+
+@router.post("/claims/bulk", response_model=BulkActionResponse)
+@limiter.limit("30/minute")
+async def bulk_claims_action(
+    request: Request,
+    body: BulkActionRequest,
+    adjuster: UserRecord = Depends(require_adjuster),
+):
+    """Apply one action to many claims as a loop of audited single actions.
+
+    Never one opaque write: each claim gets its own audit entry, and a claim
+    that fails (unknown id) reports a per-claim outcome while the rest still
+    apply. The reassign target is validated up front so a typo'd adjuster
+    cannot produce a half-applied run.
+    """
+    # Dedupe preserving order — the same id twice must not double-apply.
+    claim_ids = list(dict.fromkeys(body.claimIds))
+    reason = body.reason.strip()
+    at = _now_iso()
+
+    target: dict | None = None
+    if body.action == "reassign":
+        target_value = body.target.strip()
+        if not target_value:
+            raise HTTPException(
+                status_code=422, detail="A target adjuster is required to reassign"
+            )
+        target = await database.users_col.find_one(
+            {"$or": [{"id": target_value}, {"email": target_value.lower()}]},
+            {"_id": 0},
+        )
+        if not target or target.get("role") != "adjuster":
+            raise HTTPException(
+                status_code=404, detail=f"Target adjuster not found: {target_value}"
+            )
+
+    async def _apply_one(claim_id: str) -> BulkActionResultItem:
+        try:
+            if body.action == "reassign":
+                audit_entry = await _bulk_reassign_one(
+                    claim_id, target, adjuster, reason, at
+                )
+            else:
+                audit_entry = await _bulk_flag_one(claim_id, adjuster, reason, at)
+            return BulkActionResultItem(
+                claimId=claim_id, status="updated", auditId=audit_entry["id"]
+            )
+        except _BulkClaimError as exc:
+            # Per-claim failure: reported, never silently dropped. The loop
+            # continues so one bad id cannot eat the batch.
+            return BulkActionResultItem(
+                claimId=claim_id, status="failed", detail=exc.detail
+            )
+
+    results = [await _apply_one(claim_id) for claim_id in claim_ids]
+    updated = sum(1 for item in results if item.status == "updated")
+    failed = len(results) - updated
+    logger.info(
+        "bulk_action_applied action=%s actor=%s updated=%d failed=%d",
+        body.action,
+        adjuster.email,
+        updated,
+        failed,
+    )
+    return BulkActionResponse(
+        action=body.action, results=results, updated=updated, failed=failed
+    )

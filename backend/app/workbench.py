@@ -146,15 +146,58 @@ QUEUE_ROW_FIELDS = (
     "escalation_reason",
     "failure_reason",
     "fraud_flags",
+    "flags",
+    "assignee_id",
 )
 
 # Seeded or legacy claim docs may be missing fields the row renders; coerce
 # instead of leaking None into the response model.
 _STRING_FIELDS = frozenset(
-    {"id", "policy_number", "holder_name", "incident_type", "status", "created_at"}
+    {"id", "policy_number", "holder_name", "incident_type", "status", "created_at",
+     "assignee_id"}
 )
 _NUMBER_FIELDS = frozenset({"claimed_amount", "risk_score"})
-_LIST_FIELDS = frozenset({"fraud_flags"})
+_LIST_FIELDS = frozenset({"fraud_flags", "flags"})
+
+
+# ============ Saved views (spec F12) ============
+
+# The queue-filter keys a saved view may store — exactly the QueueParams
+# surface. Unknown keys are rejected on save (strict write, lenient read) so a
+# stale client can never plant a filter the queue silently ignores.
+VIEW_FILTER_KEYS = frozenset(
+    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction"}
+)
+
+_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction"})
+_VIEW_NUMBER_FILTERS = frozenset({"min_age_hours", "max_age_hours"})
+
+
+def normalize_view_filters(filters: dict) -> dict:
+    """Validate and clean one saved view's filter preset (pure).
+
+    Keeps only VIEW_FILTER_KEYS, requires strings for the string filters and
+    non-negative numbers for the age bounds; anything else (unknown key or
+    wrong-typed value) raises ValueError so the caller can 422 instead of
+    storing a preset that quietly does nothing.
+    """
+    if not isinstance(filters, dict):
+        raise ValueError("filters must be an object")
+    cleaned: dict = {}
+    for key, value in filters.items():
+        if key not in VIEW_FILTER_KEYS:
+            raise ValueError(f"Unknown view filter: {key!r}")
+        if key in _VIEW_STRING_FILTERS:
+            if not isinstance(value, str):
+                raise ValueError(f"View filter {key!r} must be a string")
+        else:  # age bounds
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"View filter {key!r} must be a number")
+            if value < 0:
+                raise ValueError(f"View filter {key!r} must be zero or more")
+        if value != "" or key in _VIEW_NUMBER_FILTERS:
+            cleaned[key] = value
+    return cleaned
 
 
 def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
