@@ -29,6 +29,7 @@ import {
 import DocumentRequests from './DocumentRequests';
 import OverrideModal from './OverrideModal';
 import MessageThreadPanel from './MessageThreadPanel';
+import NotesPanel from './NotesPanel';
 
 const STAGE_ORDER = ['intake', 'policy', 'documents', 'fraud', 'eligibility', 'decision'];
 
@@ -277,6 +278,7 @@ export default function CaseView() {
   const [loadError, setLoadError] = useState(null);
   const [notFound, setNotFound] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
+  const [caseTab, setCaseTab] = useState('case'); // 'case' | 'notes' (F11)
 
   const loadCase = useCallback(async () => {
     setLoadError(null);
@@ -425,6 +427,33 @@ export default function CaseView() {
         <Stat label="Age" value={formatHours(summary.sla?.hoursElapsed)} />
       </div>
 
+      {/* Case / Notes tabs (F11) */}
+      <div className="mt-6 flex gap-2 border-b border-[#1a1f2e]" role="tablist" aria-label="Case sections">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={caseTab === 'case'}
+          onClick={() => setCaseTab('case')}
+          data-testid="case-tab-case"
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${caseTab === 'case' ? 'border-[#7cb0ff] text-[#e2e8f0]' : 'border-transparent text-[#8b96ab] hover:text-[#e2e8f0]'}`}
+        >
+          Case
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={caseTab === 'notes'}
+          onClick={() => setCaseTab('notes')}
+          data-testid="case-tab-notes"
+          className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${caseTab === 'notes' ? 'border-[#7cb0ff] text-[#e2e8f0]' : 'border-transparent text-[#8b96ab] hover:text-[#e2e8f0]'}`}
+        >
+          Internal notes
+        </button>
+      </div>
+
+      {caseTab === 'case' ? (
+        <>
+
       {/* AI case summary — deterministic, from stored traces */}
       <section className="mt-6" data-testid="case-summary">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-[#e2e8f0] uppercase tracking-wider">
@@ -549,6 +578,11 @@ export default function CaseView() {
       <MessageThreadPanel claimId={summary.claimId} />
 
       <AuditTrail entries={audit} />
+
+        </>
+      ) : (
+        <NotesPanel claimId={summary.claimId} />
+      )}
 
       <OverrideModal
         claimId={summary.claimId}

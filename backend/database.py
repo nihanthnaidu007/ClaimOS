@@ -38,6 +38,9 @@ workbench_views_col = db.workbench_views
 
 # Adjuster <-> customer claim message threads (F5): append-only conversation.
 claim_messages_col = db.claim_messages
+# F11 internal notes: adjuster-only working notes, never copied onto claims,
+# agent traces, or the event stream the customer portal reads.
+claim_notes_col = db.claim_notes
 
 SEED_MARKER_ID = "seed:v1"
 
@@ -262,6 +265,9 @@ async def seed_database():
     await workbench_views_col.create_index(
         [("owner_id", 1), ("name", 1)], unique=True
     )
+
+    # claim_notes: the case view reads one claim's notes oldest-first.
+    await claim_notes_col.create_index([("claim_id", 1), ("created_at", 1)])
 
     # Marker claim: exactly one caller proceeds to the seeding block.
     try:
