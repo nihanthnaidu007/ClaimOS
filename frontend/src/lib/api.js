@@ -5,6 +5,7 @@
 // to /api/auth. Refreshing requires the session-bound CSRF cookie value in the
 // X-CSRF-Token header (double-submit), so refresh is only possible from this
 // origin.
+
 import axios from 'axios';
 
 export const API_BASE = `${import.meta.env.VITE_API_BASE_URL}/api`;

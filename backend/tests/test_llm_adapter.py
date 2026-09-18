@@ -5,7 +5,7 @@ import asyncio
 import anthropic
 import httpx
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from app.llm import adapter as adapter_module
 from app.llm.adapter import (
@@ -141,8 +141,12 @@ def test_complete_structured_returns_validated_model():
     assert usage.records[0]["agent"] == "decision"
 
 
-def test_schema_validation_failure_raises_typed_error():
-    adapter = make_adapter([FakeParsedMessage(parsed_output={"name": 12345, "score": "x"})])
+def test_schema_validation_failure_retries_then_raises_typed_error():
+    # LLM output quality is stochastic: a wrongly-shaped structured payload
+    # (e.g. a top-level JSON array) is treated like any transient failure and
+    # retried up to the cap before surfacing the typed error.
+    bad = FakeParsedMessage(parsed_output={"name": 12345, "score": "x"})
+    adapter = make_adapter([bad] * 5, max_retries=1)
 
     with pytest.raises(LLMSchemaValidationError):
         asyncio.run(
@@ -150,8 +154,58 @@ def test_schema_validation_failure_raises_typed_error():
                 model="claude-haiku-4-5", system="s", messages=[], output_schema=Box
             )
         )
-    # Schema failures are deterministic: exactly one attempt, no retries.
-    assert len(adapter._client.messages.parse_calls) == 1
+    # Hard retry cap: initial attempt + max_retries retries.
+    assert len(adapter._client.messages.parse_calls) == 2
+
+
+def test_wrong_shape_output_recovers_on_retry():
+    # A valid-JSON-but-wrong-shape payload (list instead of object) fails
+    # coercion in the SDK parse layer; the next attempt succeeds.
+    adapter = make_adapter(
+        [FakeParsedMessage(parsed_output=["wrong", "shape"]),
+         FakeParsedMessage(parsed_output=VALID_BOX)],
+        max_retries=2,
+    )
+
+    result = asyncio.run(
+        adapter.complete_structured(model="m", system="s", messages=[], output_schema=Box)
+    )
+    assert result == VALID_BOX
+    assert len(adapter._client.messages.parse_calls) == 2
+
+
+def _malformed_json_error():
+    """A pydantic ValidationError like the SDK raises on unparseable LLM JSON."""
+    try:
+        Box.model_validate(["not", "a", "dict"])
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("unreachable: Box must reject a list payload")
+
+
+def test_malformed_json_from_sdk_parse_retries_then_succeeds():
+    # The SDK validates the model's structured payload inside messages.parse;
+    # a transient unparseable response retries like any other transient error.
+    adapter = make_adapter(
+        [_malformed_json_error(), FakeParsedMessage(parsed_output=VALID_BOX)],
+        max_retries=2,
+    )
+
+    result = asyncio.run(
+        adapter.complete_structured(model="m", system="s", messages=[], output_schema=Box)
+    )
+    assert result == VALID_BOX
+    assert len(adapter._client.messages.parse_calls) == 2
+
+
+def test_malformed_json_past_retry_cap_raises_typed_schema_error():
+    adapter = make_adapter([_malformed_json_error()] * 5, max_retries=1)
+
+    with pytest.raises(LLMSchemaValidationError):
+        asyncio.run(
+            adapter.complete_structured(model="m", system="s", messages=[], output_schema=Box)
+        )
+    assert len(adapter._client.messages.parse_calls) == 2
 
 
 def test_refusal_raises_and_never_retries():

@@ -41,7 +41,10 @@ def _set_cookies(response: Response, refresh_token: str, csrf_token: str) -> Non
     flags = _cookie_flags()
     response.set_cookie(REFRESH_COOKIE, refresh_token, httponly=True, **flags)
     # Readable by the SPA (double-submit); never attached to cross-site requests.
-    response.set_cookie(CSRF_COOKIE, csrf_token, httponly=False, **flags)
+    # document.cookie filters by the current document path, and the SPA lives at
+    # /, /new-claim, /claims/:id — so this cookie cannot be path-scoped to
+    # /api/auth or silent session restore can never read it.
+    response.set_cookie(CSRF_COOKIE, csrf_token, httponly=False, **{**flags, "path": "/"})
 
 
 def _clear_cookies(response: Response) -> None:

@@ -21,6 +21,15 @@ module.exports = [
     },
   },
   {
+    // Playwright specs run in Node (Buffer, process, timers).
+    files: ["e2e/**/*.js"],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: "module",
+      globals: { ...globals.node },
+    },
+  },
+  {
     files: ["src/**/*.{js,jsx}", "*.config.js"],
     languageOptions: {
       ecmaVersion: 2022,

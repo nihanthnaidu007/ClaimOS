@@ -18,6 +18,7 @@ from starlette.middleware.cors import CORSMiddleware
 
 from app.analytics import collect_ops_analytics
 from app.auth_routes import router as auth_router
+from app.claims_routes import router as claims_router
 from app.config import settings
 from app.counters import next_claim_number
 from app.deps import (
@@ -27,6 +28,7 @@ from app.deps import (
     verify_csrf,
 )
 from app.events import emit_event, tail_claim_events
+from app.fnol_drafts import router as fnol_drafts_router
 from app.logging_setup import configure_logging
 from app.middleware import RequestIdMiddleware
 from app.rate_limit import limiter
@@ -165,29 +167,36 @@ async def submit_claim(
     access_code = generate_access_code()
     now = datetime.now(timezone.utc).isoformat()
 
-    # Seed the claim row at submission (not at worker save time): the public
-    # status page resolves the claim number + access code immediately, and the
-    # worker's full-document replace at run end carries the same credential.
-    await claims_col.insert_one(
+    # The claim record must exist the instant the API responds — for two
+    # reasons: wizard attachments upload against it right away and SSE
+    # consumers poll it while the worker runs, AND the public status page
+    # resolves the claim number + access code immediately. $setOnInsert can
+    # never clobber a terminal document the worker has already replaced
+    # (upsert races resolve in favor of the worker's rollup).
+    await claims_col.update_one(
+        {"id": claim_id},
         {
-            "id": claim_id,
-            "policy_number": submission.policyNumber,
-            "claim_date": now,
-            "incident_date": submission.incidentDate,
-            "incident_type": submission.incidentType,
-            "claimed_amount": submission.claimedAmount,
-            "status": "pending",
-            "risk_score": 0,
-            "decision_reason": "",
-            "agent_trace": {},
-            "agent_logs": [],
-            "holder_name": submission.holderName,
-            "contact_email": submission.contactEmail,
-            "is_historical": False,
-            "created_at": now,
-            "access_code": access_code,
-            "access_code_hash": access_code_hash(access_code),
-        }
+            "$setOnInsert": {
+                "id": claim_id,
+                "policy_number": submission.policyNumber,
+                "claim_date": now,
+                "incident_date": submission.incidentDate,
+                "incident_type": submission.incidentType,
+                "claimed_amount": submission.claimedAmount,
+                "status": "pending",
+                "risk_score": 0,
+                "decision_reason": "",
+                "agent_trace": {},
+                "agent_logs": [],
+                "holder_name": submission.holderName,
+                "contact_email": submission.contactEmail,
+                "is_historical": False,
+                "created_at": now,
+                "access_code": access_code,
+                "access_code_hash": access_code_hash(access_code),
+            }
+        },
+        upsert=True,
     )
 
     # Durable dispatch: the claim_runs row IS the queue. A worker claims it
@@ -571,6 +580,8 @@ api_router.include_router(auth_router)  # /auth/* under the /api prefix
 api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
 api_router.include_router(status_router)  # /status/* public portal endpoints
 api_router.include_router(notify_router)  # /notifications/* authenticated
+api_router.include_router(claims_router)  # trace, documents, evidence pack
+api_router.include_router(fnol_drafts_router)  # resumable FNOL drafts
 app.include_router(api_router)
 
 

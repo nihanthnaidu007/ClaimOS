@@ -1,36 +1,31 @@
-import { useState, useEffect } from 'react';
+// Operations dashboard: stat cards, secondary metrics, recent-claim rows.
+// Server state comes from TanStack Query; the only effect here forwards the
+// latest recent-claims slice to the Sidebar (parent state), and row clicks
+// route into the full claim detail.
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Activity, ShieldCheck, ShieldX, Clock, DollarSign, AlertTriangle, FileText, ArrowRight } from 'lucide-react';
-import axios from 'axios';
+import { useDashboardStats } from '@/lib/queries';
+import { formatDollars } from '@/features/claims/constants';
 
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
-
-const formatDollars = (n) => {
-  if (n == null) return '$0.00';
-  return '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const STATUS_PILL = {
+  approved: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30',
+  rejected: 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30',
+  under_review: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
+  escalate: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
+  pending: 'bg-[#8892a4]/10 text-[#8892a4] border-[#8892a4]/30',
 };
 
 export default function Dashboard({ onRecentClaims }) {
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
+  const statsQuery = useDashboardStats();
+  const stats = statsQuery.data;
 
   useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        const res = await axios.get(`${API}/dashboard/stats`);
-        setStats(res.data);
-        if (onRecentClaims) onRecentClaims(res.data.recentClaims || []);
-      } catch (e) {
-        console.error('Failed to fetch stats:', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchStats();
-  }, [onRecentClaims]);
+    if (stats && onRecentClaims) onRecentClaims(stats.recentClaims || []);
+  }, [stats, onRecentClaims]);
 
-  if (loading) {
+  if (statsQuery.isLoading) {
     return (
       <div className="page-enter" data-testid="dashboard-loading">
         <div className="flex items-center gap-3 mb-8">
@@ -46,6 +41,25 @@ export default function Dashboard({ onRecentClaims }) {
     );
   }
 
+  if (statsQuery.isError) {
+    return (
+      <div className="page-enter" data-testid="dashboard-error">
+        <h1 className="text-2xl font-bold tracking-tight uppercase mb-4" style={{ fontFamily: 'Space Grotesk' }}>Operations Dashboard</h1>
+        <div className="bg-[#0f1218] border border-[#1a1f2e] rounded-sm p-8 text-center">
+          <AlertTriangle className="w-8 h-8 text-[#f59e0b] mx-auto mb-3" />
+          <p className="text-sm text-[#8892a4] mb-4">Dashboard stats failed to load.</p>
+          <button
+            onClick={() => statsQuery.refetch()}
+            data-testid="dashboard-retry"
+            className="text-xs font-mono text-[#3b82f6] hover:text-[#60a5fa] transition-colors duration-200"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const statCards = [
     { label: 'TOTAL CLAIMS', value: stats?.totalClaims || 0, icon: FileText, color: 'text-[#3b82f6]', bgColor: 'bg-[#3b82f6]/10' },
     { label: 'APPROVED', value: stats?.approved || 0, icon: ShieldCheck, color: 'text-[#10b981]', bgColor: 'bg-[#10b981]/10' },
@@ -53,16 +67,7 @@ export default function Dashboard({ onRecentClaims }) {
     { label: 'UNDER REVIEW', value: (stats?.underReview || 0) + (stats?.pending || 0), icon: Clock, color: 'text-[#f59e0b]', bgColor: 'bg-[#f59e0b]/10' },
   ];
 
-  const verdictPill = (status) => {
-    const colors = {
-      approved: 'bg-[#10b981]/10 text-[#10b981] border-[#10b981]/30',
-      rejected: 'bg-[#ef4444]/10 text-[#ef4444] border-[#ef4444]/30',
-      under_review: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
-      escalate: 'bg-[#f59e0b]/10 text-[#f59e0b] border-[#f59e0b]/30',
-      pending: 'bg-[#8892a4]/10 text-[#8892a4] border-[#8892a4]/30',
-    };
-    return colors[status] || colors.pending;
-  };
+  const recent = stats?.recentClaims || [];
 
   return (
     <div className="page-enter" data-testid="dashboard">
@@ -143,21 +148,26 @@ export default function Dashboard({ onRecentClaims }) {
           </button>
         </div>
         <div className="divide-y divide-[#1a1f2e]">
-          {(stats?.recentClaims || []).length === 0 ? (
+          {recent.length === 0 ? (
             <div className="px-5 py-8 text-center text-sm text-[#4a5568]">
               No claims processed yet. Submit your first claim to see agent activity.
             </div>
           ) : (
-            stats.recentClaims.map((claim) => (
-              <div key={claim.id} className="px-5 py-3 flex items-center gap-4 hover:bg-[#141820] transition-colors duration-200">
+            recent.map((claim) => (
+              <button
+                key={claim.id}
+                onClick={() => navigate(`/claims/${claim.id}`)}
+                data-testid={`dashboard-claim-${claim.id}`}
+                className="w-full px-5 py-3 flex items-center gap-4 hover:bg-[#141820] transition-colors duration-200 text-left"
+              >
                 <span className="font-mono text-xs text-[#7dd3fc] w-40 flex-shrink-0">{claim.id}</span>
                 <span className="text-sm text-[#8892a4] flex-1 truncate">{claim.holder_name || claim.policy_number}</span>
                 <span className="text-xs text-[#8892a4] font-mono">{claim.incident_type}</span>
                 <span className="text-sm font-mono text-[#e2e8f0]">{formatDollars(claim.claimed_amount)}</span>
-                <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${verdictPill(claim.status)}`}>
+                <span className={`inline-flex items-center px-2 py-0.5 text-[10px] font-mono font-medium border rounded-none ${STATUS_PILL[claim.status] || STATUS_PILL.pending}`}>
                   {(claim.status || 'pending').toUpperCase()}
                 </span>
-              </div>
+              </button>
             ))
           )}
         </div>

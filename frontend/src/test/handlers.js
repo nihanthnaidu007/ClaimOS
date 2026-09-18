@@ -30,6 +30,13 @@ export const dashboardStats = {
   ],
 };
 
+export const sessionUser = {
+  id: 'usr_test1',
+  email: 'adjuster@claimos.dev',
+  role: 'adjuster',
+  createdAt: '2026-09-01T00:00:00Z',
+};
+
 export const workbenchQueueRows = [
   {
     id: 'CLM-1001',
@@ -107,7 +114,17 @@ export const opsAnalytics = {
 };
 
 export const handlers = [
+  // Session restore: every AuthProvider mount probes this endpoint.
+  http.post(`${API_BASE}/auth/refresh`, () =>
+    HttpResponse.json({
+      accessToken: 'test-access-token',
+      tokenType: 'bearer',
+      expiresInSeconds: 900,
+      user: sessionUser,
+    })
+  ),
   http.get(`${API_BASE}/dashboard/stats`, () => HttpResponse.json(dashboardStats)),
+  http.get(`${API_BASE}/claims`, () => HttpResponse.json(dashboardStats.recentClaims)),
   http.get(`${API_BASE}/workbench/queue`, () =>
     HttpResponse.json({ rows: workbenchQueueRows, generatedAt: '2026-09-17T10:00:00+00:00' })
   ),
@@ -129,6 +146,35 @@ export const handlers = [
       { status: 201 }
     )
   ),
+
+  // FNOL wizard: no server draft by default (404 = local copy is truth);
+  // PUT echoes the upsert the useWizardDraft autosave performs.
+  http.get(`${API_BASE}/fnol/drafts/:draftId`, () => new HttpResponse(null, { status: 404 })),
+  http.put(`${API_BASE}/fnol/drafts/:draftId`, async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json({ data: body.data, updatedAt: new Date().toISOString() });
+  }),
+
+  // Policy lookup: an ACTIVE PolicyRecord (snake_case, like the backend).
+  http.get(`${API_BASE}/policies/lookup`, ({ request }) => {
+    const url = new URL(request.url);
+    const num = url.searchParams.get('policy_number') || '';
+    if (num.toUpperCase() === 'POL-DEAD') {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json({
+      id: 'pol_fixture1',
+      policy_number: num || 'POL-2024-001847',
+      holder_name: 'Sarah Chen',
+      holder_email: 'sarah.chen@example.com',
+      holder_phone: '',
+      policy_type: 'auto',
+      status: 'active',
+      coverage_limit: 50000,
+      deductible: 500,
+      monthly_premium: 120,
+    });
+  }),
 ];
 
 // One server instance shared by every suite; tests override behavior via

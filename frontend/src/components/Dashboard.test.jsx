@@ -1,18 +1,26 @@
-// Dashboard component test — the MSW-intercepted happy path plus graceful
-// degradation when the stats API fails.
+// Dashboard component test — the MSW-intercepted happy path plus the explicit
+// error state when the stats API fails (the dashboard never renders fake
+// zeros; failure is shown with a retry).
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { http, HttpResponse } from 'msw';
 import Dashboard from './Dashboard';
 import { server, dashboardStats } from '../test/handlers';
 
-const renderDashboard = (props = {}) =>
-  render(
-    <MemoryRouter>
-      <Dashboard {...props} />
-    </MemoryRouter>
+function renderDashboard(props = {}) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <Dashboard {...props} />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
+}
 
 describe('Dashboard', () => {
   it('renders stat cards and recent claims from the mocked stats API', async () => {
@@ -31,10 +39,7 @@ describe('Dashboard', () => {
     expect(screen.getAllByText('APPROVED')).toHaveLength(2);
   });
 
-  it('falls back to zeroed state when the stats API errors', async () => {
-    // Silence the component's console.error — the failure is the scenario
-    // under test, not unexpected noise.
-    vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('shows an explicit error state with retry when the stats API fails', async () => {
     server.use(
       http.get(
         `${import.meta.env.VITE_API_BASE_URL}/api/dashboard/stats`,
@@ -45,16 +50,12 @@ describe('Dashboard', () => {
     renderDashboard();
 
     await waitFor(() =>
-      expect(screen.queryByTestId('dashboard-loading')).not.toBeInTheDocument()
+      expect(screen.getByTestId('dashboard-error')).toBeInTheDocument()
     );
 
-    expect(screen.getByTestId('dashboard')).toBeInTheDocument();
-    // All four stat cards fall back to zero, plus the active-policies card
-    // also renders "0" — five exact matches in total.
-    expect(screen.getAllByText('0').length).toBeGreaterThanOrEqual(4);
-    expect(
-      screen.getByText(/No claims processed yet/i)
-    ).toBeInTheDocument();
+    // The failure is visible and actionable, not silently zeroed.
+    expect(screen.getByText(/failed to load/i)).toBeInTheDocument();
+    expect(screen.getByTestId('dashboard-retry')).toBeInTheDocument();
   });
 
   it('pushes recent claims to the parent through onRecentClaims', async () => {

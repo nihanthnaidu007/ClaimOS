@@ -70,7 +70,12 @@ AGENT_PARAMS: dict[str, dict] = {
     # Fraud similarity: one focused judgment over duplicate-fingerprint
     # candidates; small output (verdict, confidence, cited evidence).
     "fraud": {"temperature": 0.1, "max_tokens": 2048},
-    "eligibility": {"temperature": 0.1, "max_tokens": 2048},
+    # 3000, not the 2048 default: the tuned eligibility prompt's factor
+    # enumeration exceeds 2048 output tokens for multi-factor claims — every
+    # attempt truncated mid-JSON (llm_usage showed out=2048 exactly), the SDK
+    # parsed None, and the agent exhausted its retry cap. Same budget as the
+    # document agent's verbose extraction.
+    "eligibility": {"temperature": 0.1, "max_tokens": 3000},
     "decision": {"temperature": 0.4, "max_tokens": 2500},
 }
 
@@ -233,9 +238,13 @@ async def tool_claim_history(policy_number):
     """
     start = time.time()
     cutoff = (datetime.now(timezone.utc) - timedelta(days=365)).date().isoformat()
+    # agent_logs excluded: it is audit data (and after a retry-loop failure can
+    # be megabytes). Every claim's policy agent embeds this payload in its
+    # prompt and logs it back into its own agent_logs — without the projection
+    # the bloat compounds claim over claim until the LLM rejects the prompt.
     claims = await claims_col.find(
         {"policy_number": policy_number, "claim_date": {"$gte": cutoff}},
-        {"_id": 0}
+        {"_id": 0, "agent_logs": 0}
     ).to_list(100)
     duration = int((time.time() - start) * 1000)
     return {"claims": claims, "count": len(claims), "duration_ms": duration}
