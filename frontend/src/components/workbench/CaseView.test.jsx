@@ -220,6 +220,99 @@ describe('CaseView', () => {
     // The rejected file is not listed.
     expect(screen.queryByTestId('document-item')).not.toBeInTheDocument();
   });
+
+  // F14 reopen flow: a decided claim offers Reopen (no override action), the
+  // modal posts the reason, and the reopened summary renders the record.
+  it('offers Reopen for a decided claim and records it with a reason', async () => {
+    let currentSummary = {
+      ...workbenchCaseSummary,
+      status: 'auto_approved',
+      decision: {
+        verdict: 'approved',
+        payoutAmount: 18000,
+        letterSubject: 'Claim decision',
+        hasLetterBody: false,
+      },
+    };
+    server.use(
+      http.get(`${API_BASE}/workbench/claims/CLM-1001/summary`, () =>
+        HttpResponse.json(currentSummary)
+      ),
+      http.get(`${API_BASE}/workbench/claims/CLM-1001/events`, () =>
+        HttpResponse.json({ claimId: 'CLM-1001', events: [] })
+      ),
+      http.get(`${API_BASE}/workbench/claims/CLM-1001/audit`, () => HttpResponse.json([]))
+    );
+    // Spy on the client seam, not MSW: earlier tests spy api.post without a
+    // global restore, so a leaked spy must not swallow this POST. The spy
+    // flips the mocked dossier — the reload after success observes the
+    // reopened state, exactly like the real backend transition.
+    const post = vi.spyOn(api, 'post').mockImplementation(async (url, payload) => {
+      expect(String(url)).toBe('/claims/CLM-1001/reopen');
+      currentSummary = {
+        ...currentSummary,
+        status: 'reopened',
+        reopen: {
+          actor: 'usr_1',
+          actor_email: 'adjuster@claimos.test',
+          action: 'reopen',
+          reason: payload.reason,
+          at: '2026-09-18T12:00:00+00:00',
+          auditId: 'aud_reopen_1',
+        },
+      };
+      return { data: { claimId: 'CLM-1001', status: 'reopened' } };
+    });
+    renderCase();
+
+    await waitFor(() => expect(screen.getByTestId('case-view')).toBeInTheDocument());
+    // Decided claim: no override action — reopen is the offered path.
+    expect(screen.queryByTestId('open-override')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('reopen-record')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('open-reopen'));
+    expect(screen.getByTestId('reopen-modal')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('reopen-reason'), {
+      target: { value: '  New repair estimates arrived after the decision.  ' },
+    });
+    fireEvent.click(screen.getByTestId('reopen-submit'));
+
+    expect(post).toHaveBeenCalledTimes(1);
+    // The dossier reloads after the reopen succeeds and shows the record.
+    await waitFor(() => expect(screen.getByTestId('reopen-record')).toBeInTheDocument());
+    expect(screen.getByTestId('reopen-record')).toHaveTextContent(
+      'New repair estimates arrived after the decision.'
+    );
+    // Reopened is a review state: the override action is available again.
+    await waitFor(() => expect(screen.getByTestId('open-override')).toBeInTheDocument());
+    expect(screen.queryByTestId('open-reopen')).not.toBeInTheDocument();
+  });
+
+  it('renders the reopen record and hides the reopen action on a reopened claim', async () => {
+    useCaseHandlers();
+    server.use(
+      http.get(`${API_BASE}/workbench/claims/CLM-1001/summary`, () =>
+        HttpResponse.json({
+          ...workbenchCaseSummary,
+          status: 'reopened',
+          reopen: {
+            actor: 'usr_1',
+            actor_email: 'adjuster@claimos.test',
+            action: 'reopen',
+            reason: 'New repair estimates arrived.',
+            at: '2026-09-18T12:00:00+00:00',
+            auditId: 'aud_reopen_1',
+          },
+        })
+      )
+    );
+    renderCase();
+
+    await waitFor(() => expect(screen.getByTestId('reopen-record')).toBeInTheDocument());
+    expect(screen.getByTestId('reopen-record')).toHaveTextContent('New repair estimates arrived.');
+    expect(screen.getByTestId('open-override')).toBeInTheDocument();
+    expect(screen.queryByTestId('open-reopen')).not.toBeInTheDocument();
+  });
 });
 
 describe('CaseView notes tab (F11)', () => {
