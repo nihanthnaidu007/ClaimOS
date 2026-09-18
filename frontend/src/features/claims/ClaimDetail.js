@@ -207,7 +207,7 @@ export default function ClaimDetail() {
         </div>
 
         <DocumentsPanel
-          documents={documentsQuery.data?.documents || []}
+          documents={documentsQuery.data || []}
           uploading={uploading}
           onUpload={upload}
         />

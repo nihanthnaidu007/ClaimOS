@@ -16,6 +16,7 @@ import server
 from app.config import settings
 from app.deps import CSRF_COOKIE, REFRESH_COOKIE, require_customer
 from app.schemas import UserRecord
+from app.security import create_access_token, decode_access_token
 
 from conftest import TEST_INVITE_CODE, TEST_PASSWORD
 
@@ -253,6 +254,20 @@ def test_wrong_token_type_rejected(client):
     )
     response = client.get("/api/claims", headers={"Authorization": f"Bearer {forged}"})
     assert response.status_code == 401
+
+
+def test_access_token_mints_with_default_dev_secret():
+    """Regression (pyjwt>=2.13): an empty signing secret raises InvalidKeyError
+    at mint time, turning every login into a 500 in JWT_SECRET-less
+    environments. The dev default must be non-empty and round-trip; production
+    keeps the empty-secret boot guard in the config validator."""
+    assert settings.jwt_secret, "dev default jwt_secret must never be empty"
+    token = create_access_token(
+        user_id="usr_x", email="x@claimos.dev", role="adjuster"
+    )
+    payload = decode_access_token(token)
+    assert payload["sub"] == "usr_x"
+    assert payload["type"] == "access"
 
 
 # ============ Role enforcement: 403 cross-role ============

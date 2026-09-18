@@ -5,6 +5,8 @@
 # LLM-backed agent pipelines need ANTHROPIC_API_KEY in the environment. The
 # stack starts without it, but pipeline runs fail fast with a typed error
 # from the Anthropic adapter instead of silently degrading.
+# For deterministic E2E (no API spend): LLM_PROVIDER=fixture INVITE_CODE=<code> \
+#   docker compose up -d --build
 
 services:
   api:
@@ -16,6 +18,14 @@ services:
       CORS_ORIGINS: http://localhost:3000
       UPLOAD_DIR: /data/uploads
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Deterministic E2E/CI mode: LLM_PROVIDER=fixture runs the pipeline on
+      # scripted outputs (zero API spend); FIXTURE_FAULT injects live-LLM
+      # failure classes; INVITE_CODE enables self-registration for tests.
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      FIXTURE_FAULT: ${FIXTURE_FAULT:-}
+      INVITE_CODE: ${INVITE_CODE:-}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5/minute}
+      STATUS_LOOKUP_RATE_LIMIT: ${STATUS_LOOKUP_RATE_LIMIT:-60/minute}
     volumes:
       - uploads:/data/uploads
     ports:
@@ -40,6 +50,13 @@ services:
       DB_NAME: claimos
       UPLOAD_DIR: /data/uploads
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Same fixture controls as the api service — the worker is where the
+      # pipeline (and therefore the fixture adapter and faults) actually runs.
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      FIXTURE_FAULT: ${FIXTURE_FAULT:-}
+      INVITE_CODE: ${INVITE_CODE:-}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-5/minute}
+      STATUS_LOOKUP_RATE_LIMIT: ${STATUS_LOOKUP_RATE_LIMIT:-60/minute}
     volumes:
       - uploads:/data/uploads
     depends_on:

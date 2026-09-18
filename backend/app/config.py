@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     # ---- Auth & security (auth backend PR) ----
     # HS256 signing secret for access tokens. MUST be set in any deployed
     # environment; the validator below fails boot in production when empty.
-    jwt_secret: str = ""
+    # Development falls back to an obviously-non-production secret: pyjwt
+    # >= 2.13 raises InvalidKeyError on an empty HMAC key, which turned every
+    # login in a JWT_SECRET-less environment into a 500.
+    jwt_secret: str = "dev-only-insecure-jwt-secret-change-me"
     # Short-lived access token held in browser memory (never persisted client-side).
     access_token_ttl_minutes: int = 15
     # Long-lived refresh token: opaque random value, stored SHA-256-hashed

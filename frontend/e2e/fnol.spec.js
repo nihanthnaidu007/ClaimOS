@@ -1,10 +1,14 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, uiLogin, tinyPdf } from './utils';
+import { registerUser, saveEvidence, uiLogin, tinyPdf, POLICY_600_DEDUCTIBLE } from './utils';
 
 // Serial: the upload spec reuses the claim submitted by the happy-path spec.
 test.describe.configure({ mode: 'serial' });
 
-const POLICY_NUMBER = 'AUTO-2024-001847'; // seeded active policy
+// 008899 ($600 deductible): the frequency rule escalates policies carrying
+// 3+ claims/12mo (see utils.js) — fnol shares it with refusal-fallback/sse
+// and asserts decision persistence, not a verdict, so the slate stays clean
+// for refusal's auto-approval assertions.
+const POLICY_NUMBER = POLICY_600_DEDUCTIBLE;
 const DESCRIPTION =
   'Rear-ended at a stop light on Route 9; bumper damage and the trunk will not close.';
 
@@ -108,6 +112,7 @@ test('submission runs the live pipeline to a persisted decision', async ({ page 
   // same panel with a "PROCESSING FAILED" verdict and would satisfy the
   // visibility assertion above.
   await expect(page.getByTestId('decision-panel')).not.toContainText('PROCESSING FAILED');
+  await saveEvidence(page, 'tc-1-fnol-decision-panel');
 });
 
 test('claim detail accepts uploads and streams the evidence pack', async ({ page }) => {
@@ -123,14 +128,27 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   // The persisted claim state is terminal — no pending pill.
   await expect(page.getByTestId('claim-status-pill')).not.toContainText(/pending/i);
 
-  // Upload a supporting PDF on the claim detail surface.
+  // Upload a supporting PDF on the claim detail surface. Both network legs
+  // are observed so a failure names the offending response (upload POST
+  // status, refetch GET status) instead of a silent 30s locator timeout.
   const rowsBefore = await page.getByTestId('document-row').count();
+  const refetchGet = page.waitForResponse(
+    (r) => r.url().includes('/documents') && r.request().method() === 'GET',
+    { timeout: 30_000 }
+  );
   await page
     .setInputFiles('[data-testid="document-upload-input"]', {
       name: 'repair-estimate.pdf',
       mimeType: 'application/pdf',
       buffer: tinyPdf('detail-repair-estimate'),
     });
+  const uploadPost = await page.waitForResponse(
+    (r) => r.url().includes('/documents') && r.request().method() === 'POST',
+    { timeout: 30_000 }
+  );
+  expect(uploadPost.status(), 'upload POST must return 201').toBe(201);
+  const refetch = await refetchGet;
+  expect(refetch.status(), 'documents refetch must return 200').toBe(200);
   await expect(page.getByTestId('document-row')).toHaveCount(rowsBefore + 1, {
     timeout: 30_000,
   });
@@ -148,4 +166,5 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   expect(pack.filename).toMatch(/evidence-pack-.*\.pdf$/);
   const pdfBytes = Buffer.from(pack.pdf, 'base64');
   expect(pdfBytes.subarray(0, 5).toString('utf8')).toBe('%PDF-');
+  await saveEvidence(page, 'tc-1-fnol-evidence-pack');
 });

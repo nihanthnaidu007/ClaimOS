@@ -21,8 +21,9 @@ module.exports = [
     },
   },
   {
-    // Playwright specs run in Node (Buffer, process, timers).
-    files: ["e2e/**/*.js"],
+    // Playwright specs and the evidence utilities (.mjs Node scripts) run in
+    // Node (Buffer, process, timers, console).
+    files: ["e2e/**/*.{js,mjs}"],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
