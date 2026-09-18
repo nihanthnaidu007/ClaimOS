@@ -38,10 +38,12 @@ class Settings(BaseSettings):
     # Placeholders for the LLM adapter PR (not yet consumed by the pipeline).
     llm_provider: str = "anthropic"
     llm_model: str = "claude-sonnet-4-20250514"
-    # 120s, not 60s: a full structured-output generation at the eligibility
-    # agent's 3000-token budget takes ~90s end-to-end (llm_usage latencies);
-    # at 60s every attempt died mid-generation and burned the retry cap.
-    llm_request_timeout_seconds: float = 120.0
+    # 180s, not 60s: a full structured-output generation at the eligibility
+    # agent's 3000-token budget takes ~90-120s end-to-end under API load
+    # (llm_usage latencies); at the old 60s default every attempt died
+    # mid-generation and burned the retry cap. Wired into the adapter
+    # singleton's client timeout.
+    llm_request_timeout_seconds: float = 180.0
     anthropic_api_key: str = ""
 
     # ---- Auth & security (auth backend PR) ----

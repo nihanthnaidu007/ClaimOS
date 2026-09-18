@@ -31,6 +31,7 @@ from typing import TypeVar
 import anthropic
 from pydantic import BaseModel, ValidationError
 
+from app.config import settings
 from app.usage import UsageLogger
 
 logger = logging.getLogger(__name__)
@@ -377,5 +378,15 @@ def get_adapter() -> LLMAdapter:
     """Process-wide adapter (lazy client construction keeps import/boot key-free)."""
     global _adapter
     if _adapter is None:
-        _adapter = LLMAdapter()
+        # The config field is the deployment-facing knob; LLM_TIMEOUT_S keeps
+        # priority for direct env overrides. Before this wiring, the field was
+        # dead code — the singleton silently used DEFAULT_TIMEOUT_S (60s),
+        # which killed 3000-token eligibility generations mid-flight.
+        _adapter = LLMAdapter(
+            timeout_s=float(
+                os.environ.get(
+                    "LLM_TIMEOUT_S", str(settings.llm_request_timeout_seconds)
+                )
+            )
+        )
     return _adapter
