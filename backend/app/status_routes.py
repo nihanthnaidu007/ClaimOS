@@ -85,7 +85,14 @@ async def _claim_for_access(claim_number: str, access_code: str) -> dict:
     return claim
 
 
-@router.post("/lookup", response_model=StatusLookupResponse)
+@router.post(
+    "/lookup",
+    response_model=StatusLookupResponse,
+    # response_model_exclude_unset passes the projection's key omission through
+    # to the wire: expectedResolution is absent (not null) when the SLA state
+    # cannot back an honest ETA. Fields the projection always sets still render.
+    response_model_exclude_unset=True,
+)
 @limiter.limit(settings.status_lookup_rate_limit)
 async def lookup_claim_status(request: Request, payload: StatusLookupRequest):
     claim = await _claim_for_access(payload.claimNumber, payload.accessCode)

@@ -66,6 +66,15 @@ test('the access code from submission unlocks the live status timeline', async (
 
   await expect(page.getByTestId('status-timeline')).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId('status-claim-number')).toContainText(claim.claimId);
+  // F2 / AC-2.3: the "What happens next" card renders the projection's copy.
+  // This claim is decided, so the card shows the decided line and carries no
+  // ETA chip — nothing is pending, and an absent ETA must not render.
+  await expect(page.getByTestId('next-steps-card')).toBeVisible();
+  await expect(page.getByTestId('next-steps-list')).toContainText(
+    /A decision has been made on your claim/
+  );
+  await expect(page.getByTestId('next-steps-list').locator('li')).not.toHaveCount(0);
+  await expect(page.getByTestId('status-expected-resolution')).toHaveCount(0);
   // The fixture run finished: the badge reflects the persisted decision.
   await expect(page.getByTestId('status-badge')).toContainText(/approved/i);
   // Milestones of the completed run render as timeline entries.

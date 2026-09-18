@@ -3,6 +3,7 @@ import { ShieldCheck, Search } from 'lucide-react';
 import axios from 'axios';
 
 import StatusTimeline from '@/components/StatusTimeline';
+import NextStepsCard from '@/components/NextStepsCard';
 
 const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
 
@@ -167,6 +168,26 @@ export default function StatusPortal() {
           >
             {error}
           </div>
+        )}
+
+        {(loading || status) && (
+          <NextStepsCard
+            steps={status ? status.nextSteps : undefined}
+            eta={status ? status.expectedResolution : undefined}
+            /* Skeleton only before the first result exists: once a claim is
+               shown, background refreshes keep the last good data on screen
+               (the quality bar forbids spinner swaps on refetch). */
+            loading={loading && !status}
+            /* The projection always ships nextSteps; a response without the
+               field means a stale or drifted API — a named error with Retry
+               beats silently rendering an empty card. */
+            error={
+              status && !Array.isArray(status.nextSteps)
+                ? 'The status service sent an unexpected response. Trying again usually fixes it.'
+                : null
+            }
+            onRetry={() => lookup()}
+          />
         )}
 
         {status && <StatusTimeline status={status} onDownloadLetter={downloadLetter} downloading={downloading} />}

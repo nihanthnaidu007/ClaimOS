@@ -441,6 +441,12 @@ class StatusLookupResponse(BaseModel):
     decisionReady: bool = False
     pdfAvailable: bool = False
     milestones: list[StatusMilestone] = []
+    # F2: plain-language next steps + an honest ETA. expectedResolution is
+    # omitted from the response body entirely when the projection leaves it
+    # unset (the lookup route sets response_model_exclude_unset) — absent
+    # beats an empty string or a fabricated date.
+    nextSteps: list[str] = []
+    expectedResolution: Optional[str] = None
 
 
 class StatusLetterResponse(BaseModel):
