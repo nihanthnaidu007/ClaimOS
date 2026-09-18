@@ -77,6 +77,9 @@ crash loses at most the single stage in flight.
   and reasoning trace as it streams in.
 - **Policy lookup** by exact policy number or free-text search.
 - **Claim history** — sortable table with expandable per-agent traces.
+- **Internal notes** — adjuster-only working notes on a case, with @mention
+  bell notifications, length caps, sanitization, and an audit trail; never
+  exposed to customers.
 - **PDF decision letters** for adjudicated claims.
 - **Customer status portal** — claim-number + hashed access-code lookup (no
   login), milestone timeline, decision-letter PDF, a plain-language
