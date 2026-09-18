@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { registerUser, uiLogin, tinyPdf } from './utils';
+import { registerUser, saveEvidence, uiLogin, tinyPdf } from './utils';
 
 // Serial: the upload spec reuses the claim submitted by the happy-path spec.
 test.describe.configure({ mode: 'serial' });
@@ -108,6 +108,7 @@ test('submission runs the live pipeline to a persisted decision', async ({ page 
   // same panel with a "PROCESSING FAILED" verdict and would satisfy the
   // visibility assertion above.
   await expect(page.getByTestId('decision-panel')).not.toContainText('PROCESSING FAILED');
+  await saveEvidence(page, 'tc-1-fnol-decision-panel');
 });
 
 test('claim detail accepts uploads and streams the evidence pack', async ({ page }) => {
@@ -148,4 +149,5 @@ test('claim detail accepts uploads and streams the evidence pack', async ({ page
   expect(pack.filename).toMatch(/evidence-pack-.*\.pdf$/);
   const pdfBytes = Buffer.from(pack.pdf, 'base64');
   expect(pdfBytes.subarray(0, 5).toString('utf8')).toBe('%PDF-');
+  await saveEvidence(page, 'tc-1-fnol-evidence-pack');
 });
