@@ -65,7 +65,7 @@ QA evidence: `docs/acceptance.md` maps AC-1..AC-13 to the tests and screenshots 
 
 ## Codebase map
 
-See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (FastAPI app + `/api` routers) + `backend/agents.py` (six `PIPELINE_STAGES`, typed stage IO) + `backend/pipeline.py` (claim_runs queue, checkpointed runner) + `backend/worker.py` (queue consumer) + `backend/database.py` (Motor, collections, seed) + `backend/app/` (config, auth, fraud/rating/stp, workbench, status portal, analytics, events, uploads, LLM adapter/fixture) + `frontend/src/` (Vite app: dashboard, FNOL wizard + pipeline board, workbench, status portal).
+See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (FastAPI app + `/api` routers) + `backend/agents.py` (six `PIPELINE_STAGES`, typed stage IO) + `backend/pipeline.py` (claim_runs queue, checkpointed runner) + `backend/worker.py` (queue consumer) + `backend/database.py` (Motor, collections, seed) + `backend/app/` (config, auth, assignment, fraud/rating/stp, workbench, status portal, analytics, events, uploads, LLM adapter/fixture) + `frontend/src/` (Vite app: dashboard, FNOL wizard + pipeline board, workbench, status portal).
 
 ## Local verification
 
