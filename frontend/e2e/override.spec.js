@@ -119,9 +119,9 @@ test('reopening the decided claim returns it to review, then a second decision r
   request,
 }) => {
   await uiLogin(page, adjuster);
-  await page.goto('/workbench');
-  await expect(page.getByTestId('workbench-queue')).toBeVisible({ timeout: 30_000 });
-  await page.getByTestId(`queue-row-${claimId}`).click();
+  // A decided claim is not in the default queue (it left REVIEWABLE_STATUSES
+  // when the override recorded the verdict) — reach the case view directly.
+  await page.goto(`/workbench/claims/${claimId}`);
   await expect(page.getByTestId('case-view')).toBeVisible();
 
   // Decided state: reopen is the offered action, not Record decision.
