@@ -1,0 +1,15 @@
+# Railway config-as-code for the web tier (nginx serving the Vite build).
+# Applies to services whose root directory is frontend/.
+#
+# The backend api and worker services share the backend/ root directory, so a
+# config file there would apply to both while their start commands differ
+# (Dockerfile CMD uvicorn vs `python worker.py`). Their deploy settings live in
+# service settings instead — documented in docs/runbook.md.
+
+[build]
+builder = "DOCKERFILE"
+
+[deploy]
+healthcheckPath = "/"
+healthcheckTimeout = 120
+restartPolicyType = "ALWAYS"

@@ -12,7 +12,7 @@ server {
 
     # API proxy. Keeps the /api prefix — FastAPI mounts the router at /api.
     location /api/ {
-        proxy_pass http://api:8000;
+        proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -24,7 +24,7 @@ server {
     # SSE stream (agent pipeline reasoning) — no buffering, long read timeout,
     # and a non-persistent upstream connection so events flush immediately.
     location ^~ /api/claims/stream/ {
-        proxy_pass http://api:8000;
+        proxy_pass http://${API_UPSTREAM};
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
