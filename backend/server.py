@@ -53,6 +53,7 @@ from app.workbench_routes import router as workbench_router
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.notify_routes import router as notify_router
+from app.notifications.emails import send_access_code_email
 from app.storage import get_provider, new_storage_key, sanitize_filename
 from agents import PIPELINE_STAGES
 from database import (
@@ -203,6 +204,15 @@ async def submit_claim(
     # atomically; the API process never executes the pipeline itself.
     await enqueue_claim_run(claim_id, submission.model_dump(), access_code=access_code)
     await emit_event(claim_id, {"event": "claim_submitted", "claim_id": claim_id})
+    # Access code by email (AC-1.2): claims with a contact email get the code
+    # delivered; claims without one skip silently. Delivery failures are
+    # logged, never raised — the submission must not fail on derived data.
+    await send_access_code_email(
+        claim_id,
+        recipient_email=submission.contactEmail,
+        access_code=access_code,
+        holder_name=submission.holderName,
+    )
     logger.info("claim_submitted", claim_id=claim_id)
 
     return {
