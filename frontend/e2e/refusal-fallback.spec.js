@@ -78,10 +78,13 @@ test('a refused decision call never leaves the claim without an artifact', async
   expect(letter, 'decision letter recorded').toBeTruthy();
   expect(letter).toContain('Dear');
 
-  // The adjuster surface renders the letter body.
+  // The adjuster surface renders the letter body — behind a collapsed
+  // disclosure: "View decision letter" triggers the lazy fetch, and only the
+  // open section renders letter-body.
   await uiLogin(page, adjuster);
   await page.goto(`/workbench/claims/${claimId}`);
   await expect(page.getByTestId('case-view')).toBeVisible();
+  await page.getByTestId('letter-open').click();
   await expect(page.getByTestId('letter-body')).toContainText('Dear', { timeout: 30_000 });
   await saveEvidence(page, PERSISTENT ? 'tc-6-template-letter-fallback' : 'tc-6-refusal-retry');
 });
