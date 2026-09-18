@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 import structlog
 from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo.errors import BulkWriteError, DuplicateKeyError
+from pymongo.errors import BulkWriteError, DuplicateKeyError, PyMongoError
 
 from app.config import settings
 
@@ -251,10 +251,17 @@ async def seed_database():
     await claim_runs_col.create_index([("status", 1), ("created_at", 1)])
     # audit_log: append-only trail read newest-first per claim.
     await audit_log_col.create_index([("claim_id", 1), ("at", -1)])
-    # One customer notification per claim per milestone: replayed events and
-    # retried fan-outs must never double-notify.
+    # One notification per claim per milestone per request: replayed events and
+    # retried fan-outs must never double-notify, while per-request events
+    # (portal document uploads) each deserve their own bell. Rows without a
+    # request_id (customer milestone fan-out) dedupe on (claim_id, milestone)
+    # exactly as before — absent fields index as null.
+    try:
+        await notifications_col.drop_index("claim_id_1_milestone_1")
+    except PyMongoError:
+        logger.debug("legacy_notification_index_absent")
     await notifications_col.create_index(
-        [("claim_id", 1), ("milestone", 1)], unique=True
+        [("claim_id", 1), ("milestone", 1), ("request_id", 1)], unique=True
     )
     # workbench_views (spec F12): a view name is unique per owner, so a
     # re-save of the same name can never fork into two presets. Reads are

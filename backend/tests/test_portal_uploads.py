@@ -15,6 +15,7 @@ import pytest
 from starlette.testclient import TestClient
 
 import server
+from app import portal_uploads
 from app.config import settings
 from app.storage import LocalFsProvider
 from app.status_portal import access_code_hash, generate_access_code
@@ -211,6 +212,59 @@ class TestPortalUploadRoundTrip:
                 )
             )
             == 0
+        )
+
+    def test_second_request_on_same_claim_gets_its_own_bell(
+        self, client, patched_mongo
+    ):
+        """Regression: two answered requests on one claim must both 201.
+
+        Notification dedupe originally keyed on (claim_id, milestone) alone,
+        so the second received request on the same claim collided with the
+        first bell and 500ed an upload that had already committed.
+        """
+        code = _seed(patched_mongo)
+        _run(
+            patched_mongo.document_requests.insert_one(
+                _request_doc(id="dreq_portal02", title="Police report copy")
+            )
+        )
+
+        first = _upload(client, code, request_id=REQUEST_ID)
+        second = _upload(client, code, request_id="dreq_portal02")
+
+        assert first.status_code == 201, first.text
+        assert second.status_code == 201, second.text
+        bells = _run(
+            patched_mongo.notifications.find(
+                {"claim_id": CLAIM_ID, "milestone": "document_request_received"}
+            ).to_list(10)
+        )
+        assert len(bells) == 2
+        assert {b["request_id"] for b in bells} == {REQUEST_ID, "dreq_portal02"}
+
+    def test_replayed_notification_is_deduped_not_duplicated(
+        self, client, patched_mongo
+    ):
+        """A replayed emission for the same request adds no second bell — and
+        must not fail the committed upload (DuplicateKeyError is a no-op)."""
+        _seed(patched_mongo)
+        now = _now()
+
+        for _ in range(2):
+            _run(
+                portal_uploads._notify_requesting_adjuster(
+                    CLAIM_ID, REQUEST_ID, "Repair estimate", ADJUSTER_USER_ID, now
+                )
+            )
+
+        assert (
+            _run(
+                patched_mongo.notifications.count_documents(
+                    {"claim_id": CLAIM_ID, "request_id": REQUEST_ID}
+                )
+            )
+            == 1
         )
 
 

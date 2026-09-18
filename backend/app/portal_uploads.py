@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel
 
 import database
@@ -45,7 +46,10 @@ _GENERIC_NOT_FOUND = HTTPException(
 
 # Bell notification key for the requesting adjuster. In-app only: the row is
 # written directly (not via the milestone fan-out, which emails customers and
-# dedupes per claim+milestone — wrong shape for per-request events).
+# dedupes per claim+milestone — wrong shape for per-request events). The
+# notification carries the request id, so the (claim_id, milestone,
+# request_id) unique index dedupes per request: each answered request is its
+# own bell on the same claim.
 _ADJUSTER_MILESTONE = "document_request_received"
 
 
@@ -163,7 +167,7 @@ async def upload_portal_document(
         },
     )
     await _notify_requesting_adjuster(
-        claim_id, doc_request["title"], doc_request.get("requested_by"), now
+        claim_id, requestId, doc_request["title"], doc_request.get("requested_by"), now
     )
 
     logger.info(
@@ -179,7 +183,7 @@ async def upload_portal_document(
 
 
 async def _notify_requesting_adjuster(
-    claim_id: str, request_title: str, requested_by: str | None, now: str
+    claim_id: str, request_id: str, request_title: str, requested_by: str | None, now: str
 ) -> None:
     """Bell notification for the adjuster who asked for the document.
 
@@ -199,16 +203,27 @@ async def _notify_requesting_adjuster(
         return
 
     email = requester["email"].strip().lower()
-    await database.notifications_col.insert_one(
-        {
-            "id": f"ntf_{uuid.uuid4().hex[:12]}",
-            "claim_id": claim_id,
-            "recipient_email": email,
-            "milestone": _ADJUSTER_MILESTONE,
-            "title": "Document received",
-            "body": f'"{request_title}" was uploaded by the customer on claim {claim_id}.',
-            "read": False,
-            "read_at": None,
-            "created_at": now,
-        }
-    )
+    try:
+        await database.notifications_col.insert_one(
+            {
+                "id": f"ntf_{uuid.uuid4().hex[:12]}",
+                "claim_id": claim_id,
+                "request_id": request_id,
+                "recipient_email": email,
+                "milestone": _ADJUSTER_MILESTONE,
+                "title": "Document received",
+                "body": f'"{request_title}" was uploaded by the customer on claim {claim_id}.',
+                "read": False,
+                "read_at": None,
+                "created_at": now,
+            }
+        )
+    except DuplicateKeyError:
+        # The (claim, milestone, request) bell already exists — a replayed
+        # emission for the same request. One bell is correct; the committed
+        # upload must still answer 201.
+        logger.info(
+            "adjuster_notification_deduped",
+            claim_id=claim_id,
+            request_id=request_id,
+        )
