@@ -175,7 +175,6 @@ export const handlers = [
       monthly_premium: 120,
     });
   }),
->>>>>>> 8bc032a (test(fnol): wizard flows, draft model, and trace timeline coverage)
 ];
 
 // One server instance shared by every suite; tests override behavior via

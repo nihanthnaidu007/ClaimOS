@@ -32,8 +32,9 @@ export async function uiLogin(page, { email, password }) {
 }
 
 // Minimal one-page PDF the backend's magic-byte allowlist accepts. Pass a
-// label to make uploads byte-unique — the backend de-duplicates identical
-// SHA-256 hashes, so distinct documents must not share content.
+// label to make uploads byte-unique — each upload appends a new document
+// (no de-duplication on the merged #31 route), and distinct fixtures keep
+// assertions independent of upload ordering.
 export function tinyPdf(label = 'default') {
   return Buffer.from(
     '%PDF-1.4\n' +

@@ -31,6 +31,17 @@ def auth_headers(client, make_authenticated_user):
     return headers
 
 
+@pytest.fixture
+def local_storage(tmp_path, monkeypatch):
+    """Swap the storage seam for a tmp-rooted provider (uploads default to
+    the compose-mounted /data/uploads, which does not exist in test runs)."""
+    import app.storage.provider as provider_module
+
+    monkeypatch.setattr(
+        provider_module, "_provider", provider_module.LocalFsProvider(root=tmp_path / "uploads")
+    )
+
+
 def seed_claim(patched_mongo, claim_id="CLM-000042", **overrides):
     claim = {
         "id": claim_id,
@@ -149,7 +160,7 @@ def test_trace_requires_auth(client):
 # ---- Claim documents ----
 
 
-def test_document_upload_roundtrip(client, patched_mongo, auth_headers):
+def test_document_upload_roundtrip(client, patched_mongo, auth_headers, local_storage):
     seed_claim(patched_mongo)
     payload = b"%PDF-1.4 minimal claim report"
 
@@ -158,10 +169,10 @@ def test_document_upload_roundtrip(client, patched_mongo, auth_headers):
         files={"file": ("crash-report.pdf", payload, "application/pdf")},
         headers=auth_headers,
     )
-    assert response.status_code == 200
+    assert response.status_code == 201
     meta = response.json()
-    assert meta["filename"] == "crash-report.pdf"
-    assert meta["sizeBytes"] == len(payload)
+    assert meta["file_name"] == "crash-report.pdf"
+    assert meta["size_bytes"] == len(payload)
     assert meta["sha256"] == hashlib.sha256(payload).hexdigest()
 
     # Durable audit trail: exactly one document_uploaded event.
@@ -173,35 +184,38 @@ def test_document_upload_roundtrip(client, patched_mongo, auth_headers):
     assert events == 1
 
 
-def test_document_reupload_is_idempotent(client, patched_mongo, auth_headers):
+def test_document_reupload_stores_separate_copies(client, patched_mongo, auth_headers, local_storage):
+    # The merged upload route (#31) appends a copy per upload — no SHA dedup;
+    # re-uploading identical bytes yields distinct document ids.
     seed_claim(patched_mongo)
     payload = b"%PDF-1.4 same bytes"
     files = {"file": ("crash-report.pdf", payload, "application/pdf")}
 
     first = client.post("/api/claims/CLM-000042/documents", files=files, headers=auth_headers)
     second = client.post("/api/claims/CLM-000042/documents", files=files, headers=auth_headers)
-    assert first.json()["id"] == second.json()["id"]
-    assert asyncio.run(patched_mongo.claim_documents.count_documents({})) == 1
+    assert first.status_code == 201 and second.status_code == 201
+    assert first.json()["id"] != second.json()["id"]
+    assert asyncio.run(patched_mongo.claim_documents.count_documents({})) == 2
 
 
-def test_document_rejects_disallowed_type(client, patched_mongo, auth_headers):
+def test_document_rejects_disallowed_type(client, patched_mongo, auth_headers, local_storage):
     seed_claim(patched_mongo)
     response = client.post(
         "/api/claims/CLM-000042/documents",
         files={"file": ("notes.txt", b"hello", "text/plain")},
         headers=auth_headers,
     )
-    assert response.status_code == 422
+    assert response.status_code == 415
 
 
-def test_document_rejects_oversize(client, patched_mongo, auth_headers):
+def test_document_rejects_oversize(client, patched_mongo, auth_headers, local_storage):
     seed_claim(patched_mongo)
     response = client.post(
         "/api/claims/CLM-000042/documents",
         files={"file": ("big.pdf", b"x" * (10 * 1024 * 1024 + 1), "application/pdf")},
         headers=auth_headers,
     )
-    assert response.status_code == 422
+    assert response.status_code == 413
 
 
 def test_document_requires_existing_claim(client, auth_headers):
