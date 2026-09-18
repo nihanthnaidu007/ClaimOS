@@ -16,6 +16,13 @@ const LOGS = [
     output: { policy: 'POL-2024-001847', active: true },
   },
   {
+    agent: 'FRAUD_AGENT',
+    status: 'done',
+    confidence: 0.88,
+    duration: 205,
+    output: { flags: 0, duplicates: 0 },
+  },
+  {
     agent: 'INTAKE_AGENT',
     status: 'done',
     confidence: 0.99,
@@ -56,6 +63,7 @@ describe('TraceTimeline', () => {
     expect(ids).toEqual([
       'trace-agent-INTAKE_AGENT',
       'trace-agent-POLICY_AGENT',
+      'trace-agent-FRAUD_AGENT',
       'trace-agent-DECISION_AGENT',
     ]);
   });
@@ -63,7 +71,7 @@ describe('TraceTimeline', () => {
   it('surfaces confidence, status, and per-agent errors', () => {
     render(<TraceTimeline trace={fixture()} />);
 
-    expect(screen.getAllByTestId('trace-confidence')).toHaveLength(3);
+    expect(screen.getAllByTestId('trace-confidence')).toHaveLength(4);
     expect(screen.getByText('confidence 99%')).toBeInTheDocument();
     expect(screen.getByText('confidence 92%')).toBeInTheDocument();
     expect(screen.getByTestId('trace-agent-error')).toHaveTextContent(

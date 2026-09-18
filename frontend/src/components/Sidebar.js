@@ -121,7 +121,7 @@ export default function Sidebar({ recentClaims = [] }) {
       <div className="px-4 py-3 border-t border-[#1a1f2e]">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] text-[#4a5568] font-mono">
-            ClaimOS v2.0 · 5 Agents Active
+            ClaimOS v2.0 · 6 Agents Active
           </span>
           <NotificationBell />
         </div>

@@ -106,6 +106,26 @@ describe('PipelineBoard policy tool output rendering', () => {
   });
 });
 
+describe('PipelineBoard stage coverage', () => {
+  it('renders one card for each of the six pipeline stages (backend PIPELINE_STAGES)', () => {
+    renderBoard([]);
+
+    // Regression: the shared constants dropped FRAUD_AGENT, so the live
+    // board (and everything rendered from AGENT_ORDER) showed 5 of the
+    // backend's 6 stages.
+    for (const agent of [
+      'INTAKE_AGENT',
+      'POLICY_AGENT',
+      'DOCUMENT_AGENT',
+      'FRAUD_AGENT',
+      'ELIGIBILITY_AGENT',
+      'DECISION_AGENT',
+    ]) {
+      expect(screen.getByTestId(`agent-card-${agent}`)).toBeInTheDocument();
+    }
+  });
+});
+
 describe('formatToolOutput pure formatters', () => {
   it('summarizes found/missing/empty policy data', () => {
     expect(formatPolicyLookupOutput(POLICY_LOOKUP_FOUND.output)).toBe(

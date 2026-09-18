@@ -65,7 +65,7 @@ export default function ReviewStep({ draft, errors, files, onSubmit, submitting,
       <div className="flex items-start gap-3 border-t border-[#1a1f2e] pt-4">
         <CheckCircle2 className="w-4 h-4 text-[#10b981] mt-0.5 flex-shrink-0" />
         <p className="text-xs font-mono text-[#8892a4]">
-          By submitting you attest the information is accurate. The five-agent pipeline will adjudicate this claim
+          By submitting you attest the information is accurate. The six-agent pipeline will adjudicate this claim
           and every step is recorded in a tamper-evident event log you can inspect afterwards.
         </p>
       </div>
