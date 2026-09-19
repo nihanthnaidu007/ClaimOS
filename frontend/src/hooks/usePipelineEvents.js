@@ -12,8 +12,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { getAccessToken } from '@/lib/api';
+import { buildApiUrl } from '@/lib/apiBase';
 
-const BACKEND_URL = import.meta.env.VITE_API_BASE_URL;
 const INITIAL_BACKOFF_MS = 500;
 const MAX_BACKOFF_MS = 15_000;
 // Bounded reconnects: the server closes the stream only after a terminal
@@ -128,7 +128,7 @@ export function usePipelineEvents({
           headers['Last-Event-ID'] = String(lastEventIdRef.current);
         }
 
-        const res = await fetch(`${BACKEND_URL}/api/events/streams/${claimId}`, {
+        const res = await fetch(buildApiUrl(`/events/streams/${claimId}`), {
           headers,
           signal: controller.signal,
         });

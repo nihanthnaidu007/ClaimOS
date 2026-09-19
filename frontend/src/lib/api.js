@@ -7,8 +7,9 @@
 // origin.
 
 import axios from 'axios';
+import { resolveApiBase } from './apiBase';
 
-export const API_BASE = `${import.meta.env.VITE_API_BASE_URL}/api`;
+export const API_BASE = resolveApiBase();
 
 let accessToken = null;
 let refreshPromise = null;
