@@ -407,10 +407,14 @@ class CaseSummaryResponse(BaseModel):
 
 
 class AuditEntry(BaseModel):
-    """One append-only audit_log row: who did what to which claim, and why."""
+    """One append-only audit_log row: who did what to which claim, and why.
+
+    ``claim_id`` is None for audits that are not about a single claim --
+    letter-template CRUD rows (spec F13) have no claim scope.
+    """
 
     id: str
-    claim_id: str
+    claim_id: str | None = None
     actor: str
     actor_email: str = ""
     action: str
@@ -642,3 +646,57 @@ class MarkReadRequest(BaseModel):
 
 class MarkReadResponse(BaseModel):
     markedRead: int
+
+
+# ---- Decision-letter templates (spec F13) ----
+
+
+LETTER_TEMPLATE_NAME_MAX = 120
+LETTER_TEMPLATE_SUBJECT_MAX = 300
+LETTER_TEMPLATE_BODY_MAX = 20000
+
+
+class LetterTemplateWrite(BaseModel):
+    """Create/update payload for a letter template (PUT semantics: full)."""
+
+    name: str = Field(min_length=1, max_length=LETTER_TEMPLATE_NAME_MAX)
+    description: str = Field(default="", max_length=LETTER_TEMPLATE_NAME_MAX * 2)
+    subject: str = Field(min_length=1, max_length=LETTER_TEMPLATE_SUBJECT_MAX)
+    body: str = Field(min_length=1, max_length=LETTER_TEMPLATE_BODY_MAX)
+
+    @field_validator("name", "subject", "body")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Name, subject, and body are required")
+        return value
+
+
+class LetterTemplateOut(BaseModel):
+    id: str
+    name: str
+    description: str = ""
+    subject: str
+    body: str
+    isDefault: bool = False
+    createdAt: str = ""
+    updatedAt: str = ""
+
+
+class LetterTemplateListResponse(BaseModel):
+    templates: list[LetterTemplateOut] = []
+
+
+class LetterPreviewRequest(BaseModel):
+    """Which template to preview; omitted = the seeded default."""
+
+    templateId: str | None = None
+
+
+class LetterPreviewResponse(BaseModel):
+    claimId: str
+    templateId: str
+    templateName: str
+    subject: str
+    body: str
+    warnings: list[str] = []

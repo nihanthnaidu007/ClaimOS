@@ -29,6 +29,8 @@ notifications_col = db.notifications
 # Document checklists (spec F3): claim-scoped asks with an independent
 # lifecycle — requested → received (F4 upload) or waived.
 document_requests_col = db.document_requests
+# Spec F13: decision-letter templates; the default is seeded at startup.
+letter_templates_col = db.letter_templates
 
 # Saved workbench views (spec F12): one adjuster's named queue-filter presets.
 # Views are private to their owner — every read is scoped by owner_id.
