@@ -180,6 +180,12 @@ class Settings(BaseSettings):
     # Fraction of the SLA target past which a queue row shows at-risk (amber);
     # past 100% it is breached (red).
     sla_at_risk_fraction: float = 0.75
+    # SLA escalation threshold (spec F9): a multiplier on the severity's SLA
+    # window. 1.0 (the default) escalates exactly at-breach; 1.5 escalates
+    # only when the claim is 50% past its window. The validator below rejects
+    # non-positive values so a typo'd env var cannot escalate everything at
+    # birth (or nothing ever).
+    sla_escalation_factor: float = 1.0
     # Claim assignment (spec F10). "round_robin" assigns every new claim to the
     # active adjuster with the oldest last-assignment time; "none" leaves claims
     # unassigned. Typed Literal, so a typo'd env value fails boot loudly instead
@@ -187,6 +193,13 @@ class Settings(BaseSettings):
     auto_assign: Literal["round_robin", "none"] = "round_robin"
     # Workbench SSE stream: seconds between queue re-reads on an open stream.
     workbench_stream_interval_seconds: float = 2.0
+
+    @field_validator("sla_escalation_factor")
+    @classmethod
+    def _require_positive_escalation_factor(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("SLA_ESCALATION_FACTOR must be a positive number (multiplier on the SLA window)")
+        return value
 
     @field_validator("cors_origins", mode="before")
     @classmethod
