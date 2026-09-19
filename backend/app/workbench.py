@@ -168,10 +168,11 @@ _NULLABLE_FIELDS = frozenset({"assignee_id"})
 # surface. Unknown keys are rejected on save (strict write, lenient read) so a
 # stale client can never plant a filter the queue silently ignores.
 VIEW_FILTER_KEYS = frozenset(
-    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search"}
+    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search",
+     "assignee"}
 )
 
-_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search"})
+_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search", "assignee"})
 _VIEW_NUMBER_FILTERS = frozenset({"min_age_hours", "max_age_hours"})
 
 

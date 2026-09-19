@@ -81,6 +81,15 @@ describe('saved-view filter mapping (F12)', () => {
     ).toEqual({ status: 'escalated', min_age_hours: 4, sort: 'severity' });
   });
 
+  it('drops the assignee default (all) but stores an explicit Mine/Unassigned choice', () => {
+    expect(
+      filtersToViewPreset({ severity: 'elevated', sort: 'age', assignee: 'all' })
+    ).toEqual({ severity: 'elevated', sort: 'age' });
+    expect(
+      filtersToViewPreset({ severity: '', sort: 'age', assignee: 'mine' })
+    ).toEqual({ sort: 'age', assignee: 'mine' });
+  });
+
   it('round-trips a preset back into full filter-bar state', () => {
     const preset = { severity: 'elevated', min_age_hours: 4, sort: 'risk' };
     const filters = viewPresetToFilters(preset);
@@ -91,6 +100,7 @@ describe('saved-view filter mapping (F12)', () => {
       maxAgeHours: '',
       sort: 'risk',
       search: '',
+      assignee: 'all',
     });
     expect(filtersToViewPreset(filters)).toEqual(preset);
   });

@@ -108,11 +108,14 @@ export function isReviewable(status) {
 // ---- Saved views (F12): filter-bar state <-> stored preset ----
 
 // UI filter state -> the wire preset saved in a view. Empty filters are
-// dropped so a view stores only what the adjuster actually set.
+// dropped so a view stores only what the adjuster actually set. The assignee
+// default ("all") is likewise dropped — an explicit Mine/Unassigned choice is
+// a real filter and is stored.
 export function filtersToViewPreset(filters) {
   const preset = {};
   for (const [key, value] of Object.entries(filters)) {
     if (value === '' || value == null) continue;
+    if (key === 'assignee' && value === 'all') continue;
     if (key === 'minAgeHours') preset.min_age_hours = Number(value);
     else if (key === 'maxAgeHours') preset.max_age_hours = Number(value);
     else preset[key] = value;
@@ -130,5 +133,6 @@ export function viewPresetToFilters(preset) {
     maxAgeHours: preset.max_age_hours ?? '',
     sort: preset.sort ?? 'age',
     search: preset.search ?? '',
+    assignee: preset.assignee ?? 'all',
   };
 }
