@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
 import { FileText, Upload, CheckCircle2, CircleDashed, Ban } from 'lucide-react';
 import axios from 'axios';
-
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
+import { API_BASE as API } from '../lib/api';
 
 // Mirrors the backend's UPLOAD_ALLOWED_CONTENT_TYPES / UPLOAD_MAX_BYTES
 // defaults — client-side prechecks give instant feedback; the server (which
