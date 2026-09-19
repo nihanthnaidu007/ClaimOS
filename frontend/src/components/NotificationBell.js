@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Bell, MailCheck } from 'lucide-react';
 import axios from 'axios';
+import { resolveApiBase } from '@/lib/apiBase';
 
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
+// Same-origin-safe base: resolveApiBase handles an empty OR unset
+// VITE_API_BASE_URL (raw interpolation would yield "undefined/api/...").
+const API = resolveApiBase();
 
 // In-app notification center for the signed-in customer view. Backend auth
 // requires a bearer access token; this component owns its own minimal inline

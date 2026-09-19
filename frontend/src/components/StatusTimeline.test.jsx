@@ -87,3 +87,36 @@ describe('StatusTimeline', () => {
     expect(screen.queryByText('AUTO-2024-001847')).not.toBeInTheDocument();
   });
 });
+
+// ============ F7: settlement card on the timeline ============
+
+describe('StatusTimeline settlement card', () => {
+  it('renders no settlement card before a settlement is recorded (AC-7.1)', () => {
+    // basePayload carries no settlement key — the pre-settlement payload.
+    renderTimeline();
+    expect(screen.queryByTestId('settlement-card')).not.toBeInTheDocument();
+  });
+
+  it('renders the settlement card once the payload carries a settlement (AC-7.1)', () => {
+    renderTimeline({
+      settlement: { amount: 1150, settledAt: '2026-09-19T10:42:00+00:00' },
+    });
+
+    expect(screen.getByTestId('settlement-card')).toBeInTheDocument();
+    expect(screen.getByTestId('settlement-amount')).toHaveTextContent('$1,150.00');
+  });
+
+  it('completes the final milestone when payout_recorded is done (AC-7.1)', () => {
+    // A settled claim has run to the end: every milestone is done.
+    renderTimeline({
+      milestones: basePayload.milestones.map((m) =>
+        m.key === 'decision_ready' || m.key === 'payout_recorded'
+          ? { ...m, done: true, at: '2026-09-19T10:42:00+00:00' }
+          : m
+      ),
+    });
+
+    expect(screen.getByTestId('milestone-payout_recorded')).toBeInTheDocument();
+    expect(screen.getByText('4 of 4 milestones complete')).toBeInTheDocument();
+  });
+});

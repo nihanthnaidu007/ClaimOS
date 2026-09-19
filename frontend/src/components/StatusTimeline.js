@@ -1,6 +1,7 @@
 import { CheckCircle2, Circle, Loader2, FileText } from 'lucide-react';
 
 import { DecisionTransparency } from './DecisionTransparency';
+import SettlementCard from './SettlementCard';
 
 // Presentational milestone timeline for the public status page. Pure display:
 // the payload is the masked portal response (first name + status only), so
@@ -104,6 +105,11 @@ export default function StatusTimeline({ status, onDownloadLetter, downloading }
         stageSummaries={status.stageSummaries || []}
         decision={status.decision || null}
       />
+
+      {/* F7 settlement visibility — mounts only once the payload carries a
+          settlement; the projection sends record fields that exist (amount,
+          recorded date) and no payment-method or fee data. */}
+      <SettlementCard settlement={status.settlement} />
     </div>
   );
 }

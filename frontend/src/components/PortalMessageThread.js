@@ -2,8 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 import axios from 'axios';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { resolveApiBase } from '@/lib/apiBase';
 
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
+// Same-origin-safe base: resolveApiBase handles an empty OR unset
+// VITE_API_BASE_URL (raw interpolation would yield "undefined/api/...").
+const API = resolveApiBase();
 
 // F5: the customer side of the claim conversation, served on the public
 // portal. Access is the claim number + access code pair the customer already

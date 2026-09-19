@@ -7,6 +7,7 @@ import {
   submitClaim,
   theftClaim,
   waitForTerminal,
+  authHeaders,
   POLICY_400_DEDUCTIBLE,
 } from './utils';
 
@@ -101,6 +102,47 @@ test('the access code from submission unlocks the live status timeline', async (
   }
   await saveEvidence(page, 'tc-8-portal-transparency');
   await saveEvidence(page, 'tc-8-portal-timeline');
+});
+
+test('settlement recording surfaces the card and completes the final milestone', async ({
+  page,
+  request,
+}) => {
+  // AC-7.1 absence branch: the fixture run is decided but no settlement is
+  // recorded yet — no card, and milestone 4 still pending.
+  await page.goto('/status');
+  await page.fill('[data-testid="status-claim-input"]', claim.claimId);
+  await page.fill('[data-testid="status-code-input"]', claim.accessCode);
+  await page.getByTestId('status-lookup-submit').click();
+  await expect(page.getByTestId('status-timeline')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('settlement-card')).toHaveCount(0);
+  await expect(page.getByText('3 of 4 milestones complete')).toBeVisible();
+
+  // The adjuster records the settlement (record-only facts; no money moves).
+  const adjToken = (await apiLogin(request, seededAdjuster())).token;
+  const res = await request.post(`/api/claims/${claim.claimId}/settlement`, {
+    data: { amount: 1150, method: 'bank_transfer', reference: 'E2E-SETTLE-1' },
+    headers: authHeaders(adjToken),
+  });
+  expect(res.status(), await res.text()).toBe(201);
+
+  // Re-lookup: the card appears with the recorded amount, and the final
+  // milestone completes (Wave 0 fixed the payout_recorded emission).
+  await page.getByTestId('status-lookup-submit').click();
+  await expect(page.getByTestId('settlement-card')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('settlement-amount')).toContainText(/1,150|1150/);
+  await expect(page.getByTestId('settlement-payment-timing')).toContainText(
+    /settlement has been recorded/i
+  );
+  await expect(page.getByText('4 of 4 milestones complete')).toBeVisible();
+
+  // AC-7.2 at the surface: the card renders only fields that exist on the
+  // record — the payment method and reference never reach the portal.
+  const settled = await page.content();
+  for (const marker of ['bank_transfer', 'bank transfer', 'E2E-SETTLE-1']) {
+    expect(settled, `settlement bookkeeping must not render: ${marker}`).not.toContain(marker);
+  }
+  await saveEvidence(page, 'tc-8-portal-settlement');
 });
 
 test('lookups past the per-IP limit hit the uniform rate-limit message', async ({

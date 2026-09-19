@@ -5,8 +5,11 @@ import axios from 'axios';
 import StatusTimeline from '@/components/StatusTimeline';
 import NextStepsCard from '@/components/NextStepsCard';
 import PortalMessageThread from '@/components/PortalMessageThread';
+import { resolveApiBase } from '@/lib/apiBase';
 
-const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
+// resolveApiBase keeps same-origin deploys working when VITE_API_BASE_URL is
+// empty OR unset — raw interpolation would produce "undefined/api/...".
+const API = resolveApiBase();
 
 // Public customer portal: claim number + access code -> masked status. No
 // login; the access code IS the credential. Every failure — unknown claim,
