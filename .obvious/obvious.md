@@ -69,7 +69,7 @@ See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (F
 
 ## Local verification
 
-- Backend tests: `pytest tests/ backend/tests/` — 497 passed, no live MongoDB needed (mongomock-motor). Verified 2026-09-19 on `feat/claim-messaging` (rebased on main) with the sandbox venv `/home/user/venv-claimos` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution.
+- Backend tests: `pytest tests/ backend/tests/` — 515 passed, no live MongoDB needed (mongomock-motor). Verified 2026-09-19 on `feat/claim-messaging` (rebased on main) with the sandbox venv `/home/user/venv-claimos` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution.
 - Backend lint: `ruff check backend tests` (flake8 is gone; ruff config in `backend/pyproject.toml`).
 - Frontend unit: `cd frontend && npm test`; frontend lint: `cd frontend && npx eslint .`
 - E2E: fixture-mode compose stack + `cd frontend && npx playwright test`
