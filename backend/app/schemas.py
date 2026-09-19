@@ -774,3 +774,37 @@ class MessageListResponse(BaseModel):
 
 class MessageSendResponse(BaseModel):
     message: MessageItem
+# ---- Internal claim notes (F11) ----
+
+NOTE_MAX_LENGTH = 4000
+MAX_MENTIONS_PER_NOTE = 5
+
+
+class NoteCreate(BaseModel):
+    """Body for the internal claim-notes create endpoint (F11).
+
+    min_length=0 on purpose: control-char-only bodies pass the schema and are
+    rejected by the route after sanitization leaves them blank.
+    """
+
+    body: str = Field(min_length=0, max_length=NOTE_MAX_LENGTH)
+
+
+class NoteOut(BaseModel):
+    id: str
+    claimId: str
+    authorId: str
+    authorEmail: str
+    body: str
+    mentions: list[str] = []
+    createdAt: str
+    auditEntryId: str
+
+
+class NoteCreateResponse(NoteOut):
+    pass
+
+
+class NoteListResponse(BaseModel):
+    claimId: str
+    notes: list[NoteOut] = []

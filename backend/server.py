@@ -57,6 +57,7 @@ from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.messages_routes import router as messages_router
 from app.notify_routes import router as notify_router
+from app.notes_routes import router as notes_router
 from app.notifications.emails import send_access_code_email
 from app.storage import get_provider, new_storage_key, sanitize_filename
 from agents import PIPELINE_STAGES
@@ -624,6 +625,7 @@ api_router.include_router(status_router)  # /status/* public portal endpoints
 api_router.include_router(notify_router)  # /notifications/* authenticated
 
 api_router.include_router(messages_router)  # claim message threads (F5)
+api_router.include_router(notes_router)  # adjuster-gated internal claim notes (F11)
 api_router.include_router(claims_router)  # trace, documents, evidence pack
 api_router.include_router(document_requests_router)  # adjuster document checklists (spec F3)
 api_router.include_router(fnol_drafts_router)  # resumable FNOL drafts

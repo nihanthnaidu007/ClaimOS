@@ -221,3 +221,21 @@ describe('CaseView', () => {
     expect(screen.queryByTestId('document-item')).not.toBeInTheDocument();
   });
 });
+
+describe('CaseView notes tab (F11)', () => {
+  it('opens the internal notes panel from the tab bar', async () => {
+    useCaseHandlers();
+    server.use(
+      http.get(`${API_BASE}/workbench/claims/CLM-1001/notes`, () =>
+        HttpResponse.json({ claimId: 'CLM-1001', notes: [] })
+      )
+    );
+    renderCase();
+    await waitFor(() => expect(screen.getByTestId('case-view')).toBeInTheDocument());
+    fireEvent.click(screen.getByTestId('case-tab-notes'));
+    await waitFor(() => expect(screen.getByTestId('notes-panel')).toBeInTheDocument());
+    expect(screen.getByTestId('notes-empty')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('case-tab-case'));
+    expect(screen.getByTestId('case-summary')).toBeInTheDocument();
+  });
+});
