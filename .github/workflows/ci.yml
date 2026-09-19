@@ -227,9 +227,12 @@ jobs:
       # Fixture mode keeps the pipeline scripted: deterministic and free.
       LLM_PROVIDER: fixture
       INVITE_CODE: fnol-e2e-invite
-      # The suite logs in several users per spec file; the default 5/minute
-      # login limit would trip it.
-      LOGIN_RATE_LIMIT: 30/minute
+      # Every spec shares one compose client IP, so all logins draw from a
+      # single bucket — including the two fault-phase re-runs that follow the
+      # main suite. The default 5/minute limit trips long before the suite
+      # ends, and 30/minute tripped once the portal-upload spec's logins were
+      # added (the refusal spec's final UI login got the 429).
+      LOGIN_RATE_LIMIT: 60/minute
       # Low enough that the portal rate-limit spec reaches 429 in a few
       # requests; high enough that the 10s portal poller never trips it.
       STATUS_LOOKUP_RATE_LIMIT: 10/minute

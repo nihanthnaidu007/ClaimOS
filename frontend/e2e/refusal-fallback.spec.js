@@ -33,6 +33,7 @@ test.skip(
 let adjuster;
 let customer;
 let claimId = null;
+let adjToken = null;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -51,7 +52,10 @@ test.beforeAll(async ({ request }) => {
   );
   claimId = submitted.claimId;
 
-  const adjToken = (await apiLogin(request, adjuster)).token;
+  // One adjuster login for the whole spec: the limiter counts every POST
+  // /api/auth/login from the compose client IP, and this spec runs LAST in
+  // the E2E job — the final uiLogin below must fit the same rolling window.
+  adjToken = (await apiLogin(request, adjuster)).token;
   await waitForTerminal(request, adjToken, claimId);
 });
 
@@ -59,9 +63,8 @@ test('a refused decision call never leaves the claim without an artifact', async
   page,
   request,
 }) => {
-  const { token } = await apiLogin(request, adjuster);
   const claim = await request
-    .get(`/api/claims/${claimId}`, { headers: authHeaders(token) })
+    .get(`/api/claims/${claimId}`, { headers: authHeaders(adjToken) })
     .then((r) => r.json());
 
   if (PERSISTENT) {
