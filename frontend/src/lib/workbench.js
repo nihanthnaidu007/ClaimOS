@@ -134,5 +134,6 @@ export function viewPresetToFilters(preset) {
     sort: preset.sort ?? 'age',
     search: preset.search ?? '',
     assignee: preset.assignee ?? 'all',
+    escalated: preset.escalated ?? '',
   };
 }

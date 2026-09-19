@@ -49,6 +49,7 @@ export const workbenchQueueRows = [
     created_at: '2026-09-15T08:00:00+00:00',
     severity: 'elevated',
     sla: { targetHours: 24, hoursElapsed: 50, hoursRemaining: -26, breached: true, state: 'breached' },
+    escalated_at: '2026-09-17T09:30:00+00:00',
   },
   {
     id: 'CLM-1002',
@@ -89,6 +90,7 @@ export const workbenchCaseSummary = {
     { agent: 'decision', label: 'Decision', reached: false, status: 'pending', durationMs: null, reasoning: null },
   ],
   sla: { targetHours: 24, hoursElapsed: 50, hoursRemaining: -26, breached: true, state: 'breached' },
+  escalatedAt: '2026-09-17T09:30:00+00:00',
   escalationReason: 'high value claim',
   failureReason: null,
   override: null,
@@ -119,6 +121,7 @@ export const opsAnalytics = {
     ],
     unassigned: 2,
   },
+  escalations: { total: 2, unassigned: 1 },
 };
 
 export const handlers = [
