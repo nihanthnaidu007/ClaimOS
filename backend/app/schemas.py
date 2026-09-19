@@ -588,6 +588,19 @@ class StatusMilestone(BaseModel):
     done: bool = False
 
 
+class CustomerSettlementCard(BaseModel):
+    """F7 settlement card — the customer-visible settlement-record fields.
+
+    Built field-by-field in app.status_portal.settlement_card: a field is set
+    only when it exists on the stored record, so a partially-populated record
+    projects to a partially-populated card (never placeholders). Method,
+    reference, and recorded_by are record-only bookkeeping with no path here.
+    """
+
+    amount: Optional[float] = None
+    settledAt: Optional[str] = None
+
+
 class StatusLookupResponse(BaseModel):
     """Masked portal payload: first name + claim status are the only identity
     data; amounts, contact details, and policy numbers never appear."""
@@ -617,6 +630,11 @@ class StatusLookupResponse(BaseModel):
     # notes) has no path into these models — see app/portal_projection.py.
     stageSummaries: list[CustomerStageSummary] = []
     decision: Optional[CustomerDecisionSummary] = None
+    # F7 settlement card — present only once a settlement is recorded; the
+    # key is omitted from the response body until then (same exclude_unset
+    # wire behavior as expectedResolution), and the card carries only record
+    # fields that exist: no invented payment-method or fee data.
+    settlement: Optional[CustomerSettlementCard] = None
 
 
 class StatusLetterResponse(BaseModel):

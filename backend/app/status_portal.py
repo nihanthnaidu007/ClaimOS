@@ -73,6 +73,13 @@ _DECIDED_STATUSES = frozenset({
     "auto_approved", "approved", "rejected", "escalated", "overridden", "settled",
 })
 
+# F7 settlement card: the ONLY fields on the stored settlement record that may
+# cross the projection boundary. The record is adjuster-owned bookkeeping
+# (amount, method, reference, settled_at, recorded_by); anything it gains
+# tomorrow is denied by default — porting it to customers is a deliberate act
+# here AND in the regression test, exactly like the trace allowlist.
+CUSTOMER_VISIBLE_SETTLEMENT_FIELDS = frozenset({"amount", "settled_at"})
+
 # Statuses where nothing is pending, so no ETA is honest.
 _TERMINAL_STATUSES = frozenset({"reopened", "failed"}) | _DECIDED_STATUSES
 
@@ -207,13 +214,43 @@ def milestone_timeline(events: list[dict]) -> tuple[list[dict], str | None]:
     return milestones, current_agent
 
 
-def public_status_payload(claim: dict, events: list[dict], *, now: datetime | None = None) -> dict:
+def settlement_card(claim: dict) -> dict | None:
+    """F7: the customer settlement card, projected from the stored record.
+
+    Deny by default and field by field: a field crosses only if it is in
+    ``CUSTOMER_VISIBLE_SETTLEMENT_FIELDS`` AND actually present on the record —
+    the card never renders a placeholder for data that does not exist, and
+    payment-method/reference/recorded_by (record-only bookkeeping; no payment
+    rails exist) never leave the adjuster surface. Returns None while no
+    settlement is recorded, so the payload omits the key entirely.
+    """
+    record = claim.get("settlement")
+    if not isinstance(record, dict):
+        return None
+    card: dict = {}
+    amount = record.get("amount")
+    if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+        card["amount"] = amount
+    settled_at = record.get("settled_at")
+    if isinstance(settled_at, str) and settled_at.strip():
+        card["settledAt"] = settled_at
+    return card or None
+
+
+def public_status_payload(
+    claim: dict,
+    events: list[dict],
+    *,
+    now: datetime | None = None,
+) -> dict:
     """Masked, portal-safe view of one claim. Pure — unit-testable.
 
     Identity data is reduced to the holder's first name; the decision verdict
-    is the customer's own outcome and is included, while payout amounts,
-    contact details, and the policy number never appear. The payload is built
-    field by field (deny by default): internal trace data has no path in.
+    is the customer's own outcome and is included, as is the recorded
+    settlement amount (F7 card, built field-by-field from the settlement
+    record), while contact details, the policy number, and settlement
+    bookkeeping (method, reference, recorded_by) never appear. The payload is
+    built field by field (deny by default): internal trace data has no path in.
     """
     milestones, current_agent = milestone_timeline(events)
     decision = (claim.get("agent_trace") or {}).get("decision") or {}
@@ -244,4 +281,9 @@ def public_status_payload(claim: dict, events: list[dict], *, now: datetime | No
     if eta is not None:
         # Absent means absent: the key is omitted, never an empty string.
         payload["expectedResolution"] = eta
+    # F7 settlement card: exists only once a settlement is recorded, and
+    # carries only the record fields that exist — nothing invented.
+    settlement = settlement_card(claim)
+    if settlement is not None:
+        payload["settlement"] = settlement
     return payload
