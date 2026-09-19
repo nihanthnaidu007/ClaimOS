@@ -70,6 +70,14 @@ class FraudFlagOut(BaseModel):
     evidence: dict[str, Any] = {}
 
 
+class ReviewFlag(BaseModel):
+    """One adjuster review flag (spec F12 flag-for-review) on a claim."""
+
+    reason: str
+    flagged_by: str = ""
+    flagged_at: str = ""
+
+
 # Settlement methods are a closed vocabulary: reports group on this field.
 SETTLEMENT_METHODS = ("bank_transfer", "cheque", "upi", "other")
 
@@ -110,6 +118,12 @@ class ClaimRecord(BaseModel):
     # the incident fingerprint backs future duplicate detection.
     fraud_flags: list[FraudFlagOut] = []
     incident_fingerprint: str = ""
+    # Adjuster review flags (spec F12): appended by flag-for-review bulk
+    # actions; absent on seeded/legacy claim docs.
+    flags: list[ReviewFlag] = []
+    # Assignment (spec F10 field name): set by manual reassign or bulk reassign.
+    assignee_id: str = ""
+    assignee_email: str = ""
     # Customer-provided contact for milestone notifications; adjuster-visible.
     contact_email: str = ""
     # Public status portal credential (adjuster case view displays it; the
@@ -140,6 +154,11 @@ class RecentClaimRecord(BaseModel):
     created_at: str = ""
     # Queue badge: non-empty when the fraud cross-check flagged the claim.
     fraud_flags: list[FraudFlagOut] = []
+    # Adjuster review flags (spec F12 flag-for-review bulk action); absent on
+    # seeded/legacy docs, coerced to [] like fraud_flags.
+    flags: list[ReviewFlag] = []
+    # Current assignee (spec F10 field name); empty until something assigns.
+    assignee_id: str = ""
 
 
 class DashboardStatsResponse(BaseModel):
@@ -398,6 +417,89 @@ class OverrideResponse(BaseModel):
     claimId: str
     status: str
     auditEntry: AuditEntry
+
+
+# ---- Saved views + bulk actions (workbench spec F12) ----
+
+VIEW_NAME_MAX = 80
+BULK_CLAIM_IDS_MAX = 100
+
+
+class SavedViewCreate(BaseModel):
+    """Save the current queue filters under a name (owner-private)."""
+
+    name: str = Field(min_length=1, max_length=VIEW_NAME_MAX)
+    filters: dict[str, Any] = {}
+
+    @field_validator("name")
+    @classmethod
+    def _name_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("View name cannot be blank")
+        return value.strip()
+
+
+class SavedViewOut(BaseModel):
+    """One saved view. `filters` is the parsed preset ready to apply."""
+
+    id: str
+    name: str
+    filters: dict[str, Any] = {}
+    owner_id: str = ""
+    createdAt: str = ""
+
+
+class SavedViewApplyResponse(BaseModel):
+    """Applying a view runs the queue machinery over its stored filters."""
+
+    view: SavedViewOut
+    rows: list[WorkbenchQueueRow]
+    generatedAt: str
+
+
+class BulkActionRequest(BaseModel):
+    """Bulk queue action (spec F12).
+
+    Applied claim-by-claim on the server: every touched claim gets its own
+    audit entry, and per-claim failures are reported, never dropped.
+    """
+
+    action: Literal["reassign", "flag"]
+    claimIds: list[str] = Field(min_length=1, max_length=BULK_CLAIM_IDS_MAX)
+    # Reassign target: an adjuster's user id or email. Required for reassign,
+    # validated against the users store before anything is written.
+    target: str = Field(default="", max_length=254)
+    reason: str = Field(min_length=1, max_length=OVERRIDE_REASON_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required for a bulk action")
+        return value
+
+    @field_validator("claimIds")
+    @classmethod
+    def _claim_ids_not_blank(cls, value: list[str]) -> list[str]:
+        if any(not claim_id.strip() for claim_id in value):
+            raise ValueError("Claim ids cannot be blank")
+        return [claim_id.strip() for claim_id in value]
+
+
+class BulkActionResultItem(BaseModel):
+    """Per-claim outcome of one bulk action — failures surface here."""
+
+    claimId: str
+    status: Literal["updated", "failed"]
+    auditId: str | None = None
+    detail: str | None = None
+
+
+class BulkActionResponse(BaseModel):
+    action: str
+    results: list[BulkActionResultItem]
+    updated: int
+    failed: int
 
 
 # ---- Public status portal (customer communications PR) ----

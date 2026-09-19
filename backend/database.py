@@ -30,6 +30,9 @@ notifications_col = db.notifications
 # lifecycle — requested → received (F4 upload) or waived.
 document_requests_col = db.document_requests
 
+# Saved workbench views (spec F12): one adjuster's named queue-filter presets.
+# Views are private to their owner — every read is scoped by owner_id.
+workbench_views_col = db.workbench_views
 SEED_MARKER_ID = "seed:v1"
 
 SEED_POLICIES = [
@@ -244,6 +247,12 @@ async def seed_database():
     # retried fan-outs must never double-notify.
     await notifications_col.create_index(
         [("claim_id", 1), ("milestone", 1)], unique=True
+    )
+    # workbench_views (spec F12): a view name is unique per owner, so a
+    # re-save of the same name can never fork into two presets. Reads are
+    # always owner-scoped on top of this index.
+    await workbench_views_col.create_index(
+        [("owner_id", 1), ("name", 1)], unique=True
     )
 
     # Marker claim: exactly one caller proceeds to the seeding block.

@@ -211,6 +211,27 @@ export const handlers = [
       monthly_premium: 120,
     });
   }),
+
+  // F12 saved views + bulk actions: inert defaults; suites override per test.
+  http.get(`${API_BASE}/workbench/views`, () => HttpResponse.json([])),
+  http.post(`${API_BASE}/workbench/views`, async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(
+      { id: 'vw_saved', name: body.name, filters: body.filters || {}, createdAt: new Date().toISOString() },
+      { status: 201 }
+    );
+  }),
+  http.get(`${API_BASE}/workbench/views/:viewId/apply`, () =>
+    HttpResponse.json({
+      view: { id: 'vw_default', name: 'View', filters: {}, createdAt: new Date().toISOString() },
+      rows: workbenchQueueRows,
+      generatedAt: new Date().toISOString(),
+    })
+  ),
+  http.delete(`${API_BASE}/workbench/views/:viewId`, () => HttpResponse.json({ deleted: true })),
+  http.post(`${API_BASE}/workbench/claims/bulk`, () =>
+    HttpResponse.json({ action: 'flag', results: [], updated: 0, failed: 0 })
+  ),
 ];
 
 // One server instance shared by every suite; tests override behavior via

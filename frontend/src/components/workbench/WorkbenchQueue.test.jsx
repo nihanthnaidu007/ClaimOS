@@ -10,6 +10,12 @@ import { server, workbenchQueueRows } from '../../test/handlers';
 
 const API_BASE = `${import.meta.env.VITE_API_BASE_URL}/api`;
 
+const { navigateSpy } = vi.hoisted(() => ({ navigateSpy: vi.fn() }));
+vi.mock('react-router-dom', async (importOriginal) => {
+  const actual = await importOriginal();
+  return { ...actual, useNavigate: () => navigateSpy };
+});
+
 vi.mock('@/lib/workbenchStream', () => ({
   openWorkbenchStream: vi.fn(() => vi.fn()),
 }));
@@ -251,5 +257,232 @@ describe('WorkbenchQueue', () => {
 
     pushFrame({ event: 'unknown_event', rows: [{ id: 'CLM-9999' }] });
     expect(screen.queryByText('CLM-9999')).not.toBeInTheDocument();
+  });
+});
+
+// ---- F12: bulk actions ----
+describe('WorkbenchQueue bulk actions', () => {
+  it('hides the bulk bar until a row is selected and enables select-all', async () => {
+    renderQueue();
+    await screen.findByTestId('queue-table');
+    expect(screen.queryByTestId('bulk-bar')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('select-row-CLM-1001'));
+    expect(screen.getByTestId('bulk-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('1 selected');
+
+    fireEvent.click(screen.getByTestId('select-all'));
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('2 selected');
+
+    fireEvent.click(screen.getByTestId('select-all'));
+    expect(screen.queryByTestId('bulk-bar')).not.toBeInTheDocument();
+  });
+
+  it('keeps row navigation separate from checkbox selection', async () => {
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-row-CLM-1002'));
+    expect(navigateSpy).not.toHaveBeenCalled();
+    expect(screen.getByTestId('bulk-selected-count')).toHaveTextContent('1 selected');
+  });
+
+  it('confirms the N-claim count and disables apply until a reason is entered', async () => {
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-all'));
+    fireEvent.click(screen.getByTestId('bulk-flag-button'));
+
+    expect(screen.getByTestId('bulk-modal')).toBeInTheDocument();
+    expect(screen.getByTestId('bulk-claim-count-n')).toHaveTextContent('2');
+    expect(screen.getByTestId('bulk-confirm')).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId('bulk-reason'), { target: { value: 'Suspicious invoices' } });
+    expect(screen.getByTestId('bulk-confirm')).toBeEnabled();
+  });
+
+  it('applies a bulk flag and reports the outcome', async () => {
+    const bulkPosts = [];
+    server.use(
+      http.post(`${API_BASE}/workbench/claims/bulk`, async ({ request }) => {
+        bulkPosts.push(await request.json());
+        return HttpResponse.json({
+          action: 'flag',
+          results: [
+            { claimId: 'CLM-1001', status: 'updated', auditId: 'audit-1' },
+            { claimId: 'CLM-1002', status: 'updated', auditId: 'audit-2' },
+          ],
+          updated: 2,
+          failed: 0,
+        });
+      })
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-all'));
+    fireEvent.click(screen.getByTestId('bulk-flag-button'));
+    fireEvent.change(screen.getByTestId('bulk-reason'), { target: { value: 'Suspicious invoices' } });
+    fireEvent.click(screen.getByTestId('bulk-confirm'));
+
+    await screen.findByTestId('bulk-result');
+    expect(bulkPosts[0]).toEqual({
+      action: 'flag',
+      claimIds: ['CLM-1001', 'CLM-1002'],
+      reason: 'Suspicious invoices',
+    });
+    expect(screen.getByTestId('bulk-result')).toHaveTextContent('Flagged 2 claims.');
+    expect(screen.queryByTestId('bulk-bar')).not.toBeInTheDocument(); // selection cleared
+  });
+
+  it('reports per-claim failures instead of dropping them', async () => {
+    server.use(
+      http.post(`${API_BASE}/workbench/claims/bulk`, () =>
+        HttpResponse.json({
+          action: 'flag',
+          results: [
+            { claimId: 'CLM-1001', status: 'updated', auditId: 'audit-1' },
+            { claimId: 'CLM-1002', status: 'failed', detail: 'Claim not found' },
+          ],
+          updated: 1,
+          failed: 1,
+        })
+      )
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-all'));
+    fireEvent.click(screen.getByTestId('bulk-flag-button'));
+    fireEvent.change(screen.getByTestId('bulk-reason'), { target: { value: 'Mixed batch' } });
+    fireEvent.click(screen.getByTestId('bulk-confirm'));
+
+    await screen.findByTestId('bulk-result-failures');
+    expect(screen.getByTestId('bulk-result-failures')).toHaveTextContent('1 failed:');
+    expect(screen.getByTestId('bulk-result-failures')).toHaveTextContent('CLM-1002 — Claim not found');
+  });
+
+  it('requires a target adjuster for bulk reassign and posts it', async () => {
+    const bulkPosts = [];
+    server.use(
+      http.post(`${API_BASE}/workbench/claims/bulk`, async ({ request }) => {
+        bulkPosts.push(await request.json());
+        return HttpResponse.json({
+          action: 'reassign',
+          results: [{ claimId: 'CLM-1001', status: 'updated', auditId: 'audit-1' }],
+          updated: 1,
+          failed: 0,
+        });
+      })
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-row-CLM-1001'));
+    fireEvent.click(screen.getByTestId('bulk-reassign-button'));
+    fireEvent.change(screen.getByTestId('bulk-reason'), { target: { value: 'Vacation hand-off' } });
+    expect(screen.getByTestId('bulk-confirm')).toBeDisabled(); // no target yet
+
+    fireEvent.change(screen.getByTestId('bulk-target'), { target: { value: 'ops@claimos.dev' } });
+    fireEvent.click(screen.getByTestId('bulk-confirm'));
+
+    await screen.findByTestId('bulk-result');
+    expect(bulkPosts[0]).toEqual({
+      action: 'reassign',
+      claimIds: ['CLM-1001'],
+      reason: 'Vacation hand-off',
+      target: 'ops@claimos.dev',
+    });
+    expect(screen.getByTestId('bulk-result')).toHaveTextContent('Reassigned 1 claim.');
+  });
+
+  it('surfaces bulk failures with the server detail and keeps the modal open', async () => {
+    server.use(
+      http.post(`${API_BASE}/workbench/claims/bulk`, () =>
+        HttpResponse.json({ detail: 'Target adjuster not found: ops@claimos.dev' }, { status: 404 })
+      )
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('select-row-CLM-1001'));
+    fireEvent.click(screen.getByTestId('bulk-reassign-button'));
+    fireEvent.change(screen.getByTestId('bulk-reason'), { target: { value: 'Hand-off' } });
+    fireEvent.change(screen.getByTestId('bulk-target'), { target: { value: 'ops@claimos.dev' } });
+    fireEvent.click(screen.getByTestId('bulk-confirm'));
+
+    await screen.findByTestId('bulk-error');
+    expect(screen.getByTestId('bulk-error')).toHaveTextContent('Target adjuster not found: ops@claimos.dev');
+    expect(screen.getByTestId('bulk-modal')).toBeInTheDocument();
+    expect(screen.queryByTestId('bulk-result')).not.toBeInTheDocument();
+  });
+});
+
+// ---- F12: saved views ----
+describe('WorkbenchQueue saved views', () => {
+  const savedView = {
+    id: 'vw_1',
+    name: 'Elevated invoices',
+    filters: { severity: 'elevated', sort: 'age' },
+    createdAt: '2026-09-18T09:00:00+00:00',
+  };
+
+  it('saves the current filters as a named view and lists it as a chip', async () => {
+    const viewPosts = [];
+    server.use(
+      http.post(`${API_BASE}/workbench/views`, async ({ request }) => {
+        viewPosts.push(await request.json());
+        return HttpResponse.json({ ...savedView, id: 'vw_new1' }, { status: 201 });
+      }),
+      http.get(`${API_BASE}/workbench/views`, () =>
+        HttpResponse.json([{ ...savedView, id: 'vw_new1' }])
+      )
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.change(screen.getByTestId('filter-severity'), { target: { value: 'elevated' } });
+    fireEvent.click(screen.getByTestId('save-view-button'));
+    fireEvent.change(screen.getByTestId('view-name-input'), { target: { value: 'Elevated invoices' } });
+    fireEvent.click(screen.getByTestId('view-save-confirm'));
+
+    await screen.findByTestId('view-chip-vw_new1');
+    expect(viewPosts[0]).toEqual({
+      name: 'Elevated invoices',
+      filters: { severity: 'elevated', sort: 'age' },
+    });
+  });
+
+  it('applies a saved view: filters and rows update from the server response', async () => {
+    server.use(
+      http.get(`${API_BASE}/workbench/views`, () => HttpResponse.json([savedView])),
+      http.get(`${API_BASE}/workbench/views/vw_1/apply`, () =>
+        HttpResponse.json({
+          view: savedView,
+          rows: [workbenchQueueRows[0]],
+          generatedAt: '2026-09-18T09:00:00+00:00',
+        })
+      )
+    );
+    renderQueue();
+    await screen.findByTestId('queue-table');
+
+    fireEvent.click(screen.getByTestId('view-chip-vw_1'));
+
+    await waitFor(() => expect(screen.getByTestId('filter-severity')).toHaveValue('elevated'));
+    expect(screen.getByText('Grace Hopper')).toBeInTheDocument();
+    expect(screen.queryByText('Alan Turing')).not.toBeInTheDocument();
+  });
+
+  it('deletes a saved view and drops its chip', async () => {
+    server.use(http.get(`${API_BASE}/workbench/views`, () => HttpResponse.json([savedView])));
+    renderQueue();
+    await screen.findByTestId('view-chip-vw_1');
+
+    server.use(http.get(`${API_BASE}/workbench/views`, () => HttpResponse.json([])));
+    fireEvent.click(screen.getByTestId('view-delete-vw_1'));
+
+    await waitFor(() => expect(screen.queryByTestId('view-chip-vw_1')).not.toBeInTheDocument());
   });
 });
