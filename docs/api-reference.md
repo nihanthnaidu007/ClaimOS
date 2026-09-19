@@ -68,7 +68,7 @@ Response `200`: `{"claimId": "CLM-YYYYMMDD-NNN", "message": "Claim queued for pr
 
 **`GET /api/claims/{claim_id}/trace`** — *adjuster.* `200` `TraceResponse`: `{claimId, claimStatus, events: [{seq, event, data, createdAt}], runs: [{attempt, status, createdAt, finishedAt, failureReason, escalationReason, stp}], agentLogs, agentTrace, decision}` — everything the claim-detail timeline renders, from durable state only.
 
-**`GET /api/claims/{claim_id}/pdf`** — *adjuster.* `200` `{"pdf": "<base64 PDF>", "claimId": "…"}` — the decision letter, rebuilt from the stored claim. Errors: `404`.
+**`GET /api/claims/{claim_id}/pdf`** — *adjuster.* Optional `?template_id=` renders that letter template into the letter section before generation (omitted → the persisted letter, unchanged). `200` `{"pdf": "<base64 PDF>", "claimId": "…"}`. Errors: `404` unknown claim or unknown template.
 
 ## Streaming (any authenticated user)
 
@@ -172,6 +172,18 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 **`GET /api/workbench/claims/{claim_id}/audit`** → `200` `AuditEntry[]` — append-only history, newest first, capped at 200.
 
 **`POST /api/workbench/claims/{claim_id}/assignee`** — the audited manual-reassignment path (spec F10). Request: `{assigneeId, reason (required, not blank)}`. → `200` `{"claimId", "assigneeId", "auditEntry": AuditEntry}` — stamps the claim's `assignee_id`/`assigned_at`/`assigned_by` (the acting human, never the auto-picker), appends an audit_log entry, and emits `claim_reassigned` on the claim's event stream. Errors: `404` unknown claim or unknown target user; `409` when the target is inactive or not an adjuster; `422` when the reason is missing or blank; `401` unauthenticated.
+
+### Letter templates (adjuster — spec F13)
+
+**`GET /api/workbench/letter-templates`** → `200` `{templates: [{id, name, description, subject, body, isDefault, createdAt, updatedAt}]}` — all templates, oldest first. The seeded default (`ltpl_default_decision`) always exists.
+
+**`POST /api/workbench/letter-templates`** — create. Request: `{name (1–120), description (≤240), subject (1–300), body (1–20000)}`; blank name/subject/body rejected. → `201` the template. Audited: `letter_template_created` (snapshot, actor).
+
+**`PUT /api/workbench/letter-templates/{template_id}`** — full replace. → `200` the updated template. Audited: `letter_template_updated` (before/after). Errors: `404`, `422` validation.
+
+**`DELETE /api/workbench/letter-templates/{template_id}`** — → `200` `{"deleted": id}`. Audited: `letter_template_deleted`. The seeded default cannot be deleted — `409`. Errors: `404`.
+
+**`POST /api/workbench/claims/{claim_id}/letter/preview`** — renders a template against the claim's merge context **without persisting, mutating, or auditing anything**. Request: `{templateId?}` (omitted → the default). → `200` `{claimId, templateId, templateName, subject, body, warnings}`. Merge variables: `{{claim_number}}`, `{{customer_name}}`, `{{policy_number}}`, `{{decision}}`, `{{amount}}`, `{{today}}` (plus `{{incident_type}}`, `{{incident_date}}`, which the default letter uses). Unknown variables render empty with an `unknown_variable:<name>` warning; malformed brace pairs are swept — raw `{{...}}` braces never reach a rendered letter.
 
 ## Status portal (public — credential-bearing POSTs)
 
