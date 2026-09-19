@@ -11,6 +11,7 @@ merge-clean; server.py includes it with one line. FNOL drafts live in their
 own router (app.fnol_drafts).
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timezone
 
@@ -186,5 +187,6 @@ async def get_evidence_pack(claim_id: str, current_user: UserRecord = Depends(re
     runs = await database.claim_runs_col.find(
         {"claim_id": claim_id}, {"_id": 0}
     ).sort("attempt", 1).to_list(50)
-    pdf_base64 = generate_evidence_pack(claim, events, runs)
+    # fpdf2 rendering is CPU-bound and synchronous — keep it off the event loop.
+    pdf_base64 = await asyncio.to_thread(generate_evidence_pack, claim, events, runs)
     return {"claimId": claim_id, "filename": f"evidence-pack-{claim_id}.pdf", "pdf": pdf_base64}

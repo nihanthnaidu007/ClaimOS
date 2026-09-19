@@ -4,7 +4,7 @@
 // this component only wires the router, the auth gate, and the sidebar.
 // Claim detail lives at /claims/:id — the full trace timeline, documents,
 // and evidence pack for one claim.
-import { useState, useCallback } from 'react';
+import { lazy, Suspense, useState, useCallback } from 'react';
 import "@/App.css";
 import { BrowserRouter, Routes, Route, Outlet, Link, useNavigate } from "react-router-dom";
 import { LogOut, Hexagon, BarChart3 } from "lucide-react";
@@ -16,9 +16,20 @@ import { AuthProvider, RequireRole, useAuth } from "@/lib/auth";
 import WorkbenchQueue from "@/components/workbench/WorkbenchQueue";
 import CaseView from "@/components/workbench/CaseView";
 import StatusPortal from "@/components/StatusPortal";
-import OpsAnalytics from "@/components/workbench/OpsAnalytics";
 import NewClaimPage from "@/features/claims/NewClaimPage";
 import ClaimDetail from "@/features/claims/ClaimDetail";
+
+// Ops analytics is adjuster-only and heavy (recharts) — code-split it out of
+// the main bundle and load it on first visit to /workbench/ops.
+const OpsAnalytics = lazy(() => import("@/components/workbench/OpsAnalytics"));
+
+function OpsFallback() {
+  return (
+    <div className="flex h-full items-center justify-center p-8 text-sm text-[var(--text-muted)]">
+      Loading analytics…
+    </div>
+  );
+}
 
 function WorkbenchShell() {
   const { user, logout } = useAuth();
@@ -103,7 +114,14 @@ function App() {
             <Route index element={<WorkbenchQueue />} />
             <Route path="claims/:claimId" element={<CaseView />} />
             {/* Ops analytics: adjuster-only metric groups (spec AC-9). */}
-            <Route path="ops" element={<OpsAnalytics />} />
+            <Route
+              path="ops"
+              element={
+                <Suspense fallback={<OpsFallback />}>
+                  <OpsAnalytics />
+                </Suspense>
+              }
+            />
           </Route>
           {/* Claimant console: any authenticated user. */}
           <Route

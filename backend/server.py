@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import json
 import uuid
@@ -293,7 +294,8 @@ async def get_claim_pdf(
         state["decision"]["letterSubject"] = rendered["subject"]
         state["decision"]["letterBody"] = rendered["body"]
 
-    pdf_base64 = generate_claim_pdf(state)
+    # fpdf2 rendering is CPU-bound and synchronous — keep it off the event loop.
+    pdf_base64 = await asyncio.to_thread(generate_claim_pdf, state)
     return {"pdf": pdf_base64, "claimId": claim_id}
 
 
@@ -633,6 +635,14 @@ async def startup():
     await seed_database()
     await seed_demo_users()
     await letter_templates_module.ensure_default_template()
+    # Production boot already rejects the wildcard (config validator); in
+    # lower environments it is the convenient default, so warn instead of fail.
+    if settings.environment != "production" and "*" in settings.cors_origins:
+        logger.warning(
+            "cors_wildcard_non_production",
+            environment=settings.environment,
+            hint="set CORS_ORIGINS to an explicit allowlist before deploying",
+        )
     logger.info("claimos_api_ready", environment=settings.environment, agents=5)
 
 

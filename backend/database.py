@@ -26,6 +26,10 @@ refresh_tokens_col = db.refresh_tokens
 # insert; there is no update or delete path in the application.
 audit_log_col = db.audit_log
 notifications_col = db.notifications
+# LLM usage telemetry (app/usage.py): resolved dynamically there via
+# db[USAGE_COLLECTION]; the constant lives here so ensure-seeding can index it
+# without a circular import.
+LLM_USAGE_COLLECTION = "llm_usage"
 # Document checklists (spec F3): claim-scoped asks with an independent
 # lifecycle — requested → received (F4 upload) or waived.
 document_requests_col = db.document_requests
@@ -241,9 +245,16 @@ async def seed_database():
     await claim_documents_col.create_index("claim_id")
     # document_requests: the case-view checklist queries per claim, oldest first.
     await document_requests_col.create_index("claim_id")
-    # audit_log: append-only rows are queried per claim (case view) and by time.
-    await audit_log_col.create_index("claim_id")
-    await audit_log_col.create_index("at")
+    # audit_log: append-only trail read newest-first per claim; the compound
+    # index covers every audit read (its claim_id prefix serves the per-claim
+    # equality filter). The legacy single-field claim_id/at indexes it
+    # superseded are dropped from pre-existing deployments.
+    await audit_log_col.create_index([("claim_id", 1), ("at", -1)])
+    for legacy in ("claim_id_1", "at_1"):
+        try:
+            await audit_log_col.drop_index(legacy)
+        except PyMongoError:
+            logger.debug("legacy_audit_log_index_absent", index=legacy)
     await events_col.create_index([("claim_id", 1), ("seq", 1)], unique=True)
 
     await claim_messages_col.create_index([("claim_id", 1), ("created_at", 1)])
@@ -252,8 +263,10 @@ async def seed_database():
     # {status, created_at} backs the worker's atomic queue-claim query.
     await claim_runs_col.create_index([("claim_id", 1), ("attempt", 1)], unique=True)
     await claim_runs_col.create_index([("status", 1), ("created_at", 1)])
-    # audit_log: append-only trail read newest-first per claim.
-    await audit_log_col.create_index([("claim_id", 1), ("at", -1)])
+    # notifications: the bell dropdown filters by recipient email; mark-read
+    # matches the application-level id field scoped to the recipient.
+    await notifications_col.create_index("recipient_email")
+    await notifications_col.create_index("id")
     # One notification per claim per milestone per request: replayed events and
     # retried fan-outs must never double-notify, while per-request events
     # (portal document uploads) each deserve their own bell. Rows without a
@@ -275,6 +288,23 @@ async def seed_database():
 
     # claim_notes: the case view reads one claim's notes oldest-first.
     await claim_notes_col.create_index([("claim_id", 1), ("created_at", 1)])
+
+    # users: login and per-request role lookups key on email. Created here so
+    # the index exists even when demo seeding is skipped (production).
+    await users_col.create_index("email", unique=True)
+
+    # refresh_tokens: rotation validates the presented token by hash, and
+    # reuse detection revokes every token in the family.
+    await refresh_tokens_col.create_index("token_hash")
+    await refresh_tokens_col.create_index("family_id")
+
+    # llm_usage (app/usage.py): per-claim cost rollups match claim_id, and
+    # logged_at expires telemetry after ~90 days. TTL requires a BSON Date —
+    # usage.py writes a datetime, not an ISO string.
+    await db[LLM_USAGE_COLLECTION].create_index("claim_id")
+    await db[LLM_USAGE_COLLECTION].create_index(
+        "logged_at", expireAfterSeconds=90 * 24 * 60 * 60
+    )
 
     # Marker claim: exactly one caller proceeds to the seeding block.
     try:
@@ -324,8 +354,11 @@ async def seed_demo_users() -> None:
     no known default credential is ever shipped silently. Existing users are
     never overwritten, so production password rotations survive redeploys.
     """
-    # Unique index first: the existence check + insert below is not atomic.
-    await users_col.create_index("email", unique=True)
+    # Defensive gate: production provisions users server-side; demo accounts
+    # must never exist there even if settings carry credentials.
+    if settings.environment == "production":
+        logger.info("demo_user_seeding_skipped", reason="production environment")
+        return
 
     from app.security import hash_password  # local import: avoids config-at-import cycle risk
 
