@@ -4,6 +4,7 @@ import {
   accidentClaim,
   authHeaders,
   registerUser,
+  seededAdjuster,
   submitClaim,
   tinyPdf,
   uiLogin,
@@ -32,8 +33,10 @@ let claim = null;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
+  // Registration is customer-only (the server assigns the role); adjuster
+  // sessions come from the seeded demo account.
+  adjuster = seededAdjuster();
+  customer = await registerUser(request);
 
   const custToken = (await apiLogin(request, customer)).token;
   // $4,200 accident -> elevated severity -> STP refuses -> escalated (terminal).
