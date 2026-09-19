@@ -31,6 +31,15 @@ complete per-agent reasoning trace.
    any number of API replicas can serve any client (no in-memory queues).
 5. **Decision letter** — the Decision agent produces a verdict, payout amount,
    and next steps, rendered as a PDF with the reasoning trace.
+6. **Customer decision transparency** — the status portal explains how a claim
+   was decided: `/api/status/lookup` returns a deny-by-default projection of
+   the stored agent trace (`CUSTOMER_VISIBLE_TRACE_FIELDS` in
+   `backend/app/portal_projection.py` — only allowlisted fields cross the
+   boundary), pre-written stage copy from `PORTAL_STAGE_COPY` (never raw agent
+   output), and the decision's plain-language summary plus customer citations
+   on decided claims. Internal data — fraud scores, similar-incident matches,
+   thresholds, model metadata, internal notes — has no path into any customer
+   endpoint, enforced by a dedicated regression test.
 
 ## Architecture
 

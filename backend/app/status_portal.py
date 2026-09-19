@@ -13,6 +13,7 @@ import math
 import secrets
 from datetime import datetime
 
+from app.portal_projection import PORTAL_STAGE_COPY, build_customer_projection
 from app.security import sha256_hex
 
 # workbench is the SLA authority: the portal reuses its target/state math and
@@ -61,22 +62,9 @@ _PORTAL_STAGE_ORDER = (
     "DECISION_AGENT",
 )
 
-# The customer-facing stage copy (F2): one entry per pipeline stage plus the
-# states a claim can settle in. Plain language on purpose — the UX quality bar
-# bans insurance jargon on the portal, so stages read as human actions ("we
-# check your policy"), never agent names. This constant is the ONLY source of
-# that copy: endpoints and components must not hardcode their own.
-PORTAL_STAGE_COPY = {
-    "INTAKE_AGENT": "We review your claim details and make sure we have everything we need.",
-    "POLICY_AGENT": "We check your policy to confirm what's covered.",
-    "DOCUMENT_AGENT": "We review the photos, estimates, and documents you submitted.",
-    "FRAUD_AGENT": "We run routine consistency checks that help keep things fair for everyone.",
-    "ELIGIBILITY_AGENT": "We make a final check of everything against your policy.",
-    "DECISION_AGENT": "We prepare your decision and let you know as soon as it's ready.",
-    "decided": "A decision has been made on your claim. You can read the outcome and download your decision letter below.",
-    "reopened": "We've reopened your claim and our team is taking another look. We'll keep you posted here.",
-    "failed": "Something went wrong on our end while processing your claim. We're fixing it and will update you here.",
-}
+# The customer-facing stage copy (PORTAL_STAGE_COPY) lives in
+# app.portal_projection; the top-level import re-exports it for tests and
+# components that consume it from the portal surface.
 
 # Statuses that mean the claim has settled out of the pipeline even if the
 # decision trace were somehow missing — the customer sees the decided copy.
@@ -122,17 +110,17 @@ def next_steps(claim: dict, current_agent: str | None) -> list[str]:
     """
     status = claim.get("status") or "pending"
     if status == "reopened":
-        return [PORTAL_STAGE_COPY["reopened"]]
+        return [PORTAL_STAGE_COPY["reopened"]["nextStep"]]
     if status == "failed":
-        return [PORTAL_STAGE_COPY["failed"]]
+        return [PORTAL_STAGE_COPY["failed"]["nextStep"]]
     if status in _DECIDED_STATUSES or (claim.get("agent_trace") or {}).get("decision"):
-        return [PORTAL_STAGE_COPY["decided"]]
+        return [PORTAL_STAGE_COPY["decided"]["nextStep"]]
     # In flight: from the current stage onward. A claim whose events haven't
     # started yet (or whose current agent isn't a known stage) shows the run.
     start = 0
     if current_agent in _PORTAL_STAGE_ORDER:
         start = _PORTAL_STAGE_ORDER.index(current_agent)
-    return [PORTAL_STAGE_COPY[stage] for stage in _PORTAL_STAGE_ORDER[start:]]
+    return [PORTAL_STAGE_COPY[stage]["nextStep"] for stage in _PORTAL_STAGE_ORDER[start:]]
 
 
 def expected_resolution(claim: dict, *, now: datetime | None = None) -> str | None:
@@ -229,6 +217,11 @@ def public_status_payload(claim: dict, events: list[dict], *, now: datetime | No
     milestones, current_agent = milestone_timeline(events)
     decision = (claim.get("agent_trace") or {}).get("decision") or {}
     status = claim.get("status") or "pending"
+    # F6 transparency: the deny-by-default projection is the only path from the
+    # stored trace into this payload. Stage summaries carry pre-written copy;
+    # the decision block carries the decision's own summary + citations, and
+    # exists only once a decision exists.
+    projection = build_customer_projection(claim, claim.get("agent_trace") or {})
     payload = {
         "claimNumber": claim.get("id", ""),
         "firstName": first_name(claim.get("holder_name", "")),
@@ -242,6 +235,8 @@ def public_status_payload(claim: dict, events: list[dict], *, now: datetime | No
         "milestones": milestones,
         # F2: pre-written stage copy + an ETA derived from existing SLA state.
         "nextSteps": next_steps(claim, current_agent),
+        "stageSummaries": [s.model_dump() for s in projection.stage_summaries],
+        "decision": projection.decision.model_dump() if projection.decision else None,
     }
     eta = expected_resolution(claim, now=now)
     if eta is not None:

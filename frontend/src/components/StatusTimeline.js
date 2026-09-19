@@ -1,5 +1,7 @@
 import { CheckCircle2, Circle, Loader2, FileText } from 'lucide-react';
 
+import { DecisionTransparency } from './DecisionTransparency';
+
 // Presentational milestone timeline for the public status page. Pure display:
 // the payload is the masked portal response (first name + status only), so
 // nothing here can render PII even by accident.
@@ -95,6 +97,13 @@ export default function StatusTimeline({ status, onDownloadLetter, downloading }
           {downloading ? 'Preparing…' : 'Download decision letter (PDF)'}
         </button>
       )}
+
+      {/* F6 decision transparency — safe projection output only; internal
+          trace data never reaches this component. */}
+      <DecisionTransparency
+        stageSummaries={status.stageSummaries || []}
+        decision={status.decision || null}
+      />
     </div>
   );
 }

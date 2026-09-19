@@ -313,6 +313,8 @@ PORTAL_PAYLOAD_ALLOWLIST = frozenset({
     "claimNumber", "firstName", "status", "statusLabel", "currentStage",
     "incidentType", "decisionOutcome", "decisionReady", "pdfAvailable",
     "milestones", "nextSteps", "expectedResolution",
+    # F6 decision transparency — the deny-by-default projection's output.
+    "stageSummaries", "decision",
 })
 
 STAGE_NAMES = tuple(stage["name"] for stage in PIPELINE_STAGES)
@@ -357,8 +359,8 @@ def test_portal_stage_copy_tracks_pipeline_stages():
     non-empty copy."""
     assert _PORTAL_STAGE_ORDER == STAGE_NAMES
     assert set(PORTAL_STAGE_COPY) == set(STAGE_NAMES) | {"decided", "reopened", "failed"}
-    for text in PORTAL_STAGE_COPY.values():
-        assert isinstance(text, str) and text.strip()
+    for entry in PORTAL_STAGE_COPY.values():
+        assert isinstance(entry["nextStep"], str) and entry["nextStep"].strip()
 
 
 @pytest.mark.parametrize("stage_index", range(len(STAGE_NAMES)))
@@ -370,7 +372,7 @@ def test_next_steps_nonempty_for_every_pipeline_stage(stage_index):
 
     steps = payload["nextSteps"]
     assert steps and all(step.strip() for step in steps)
-    assert steps[0] == PORTAL_STAGE_COPY[STAGE_NAMES[stage_index]]
+    assert steps[0] == PORTAL_STAGE_COPY[STAGE_NAMES[stage_index]]["nextStep"]
 
 
 @pytest.mark.parametrize(
@@ -385,13 +387,13 @@ def test_next_steps_nonempty_for_every_pipeline_stage(stage_index):
 def test_next_steps_nonempty_for_terminal_states(overrides, key):
     """AC-2.1: terminal states never render an empty card."""
     payload = public_status_payload(_projection_claim(**overrides), [])
-    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[key]]
+    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[key]["nextStep"]]
 
 
 def test_next_steps_show_full_run_before_events_start():
     """A queued claim (no events yet) previews the whole pipeline."""
     payload = public_status_payload(_projection_claim(), [])
-    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[stage] for stage in STAGE_NAMES]
+    assert payload["nextSteps"] == [PORTAL_STAGE_COPY[stage]["nextStep"] for stage in STAGE_NAMES]
 
 
 def test_projection_allowlist_blocks_internal_fields():
@@ -509,3 +511,148 @@ def test_lookup_omits_eta_field_without_sla_state(client, patched_mongo):
     body = _lookup(client, "CLM-20260917-090", code).json()
     assert "expectedResolution" not in body
     assert body["nextSteps"]  # the card copy does not depend on the ETA
+
+# ============ F6 decision transparency (deny-by-default projection) ============
+
+
+def _decided_trace() -> dict:
+    """A realistic decided trace carrying every internal field the pipeline
+    stores — none of which may reach a customer endpoint."""
+    return {
+        "intake": {
+            "valid": True,
+            "normalizedData": {"policyNumber": "AUTO-2024-001847", "claimedAmount": 1200.0},
+            "summary": "Normalized the submission.",
+        },
+        "policy": {
+            "found": True,
+            "status": "active",
+            "citedFields": ["end_date=2027-01-01"],
+            "adjustedPayout": 380.0,
+            "summary": "Policy active.",
+        },
+        "documents": {
+            "consistency": "consistent",
+            "consistencyScore": 1.0,
+            "redFlags": [],
+            "summary": "Documents consistent.",
+        },
+        "fraud": {
+            "fingerprint": "fp-internal",
+            "flags": [{"code": "high_amount"}],
+            "similarity": {"verdict": "coincidence"},
+        },
+        "eligibility": {
+            "riskScore": 12,
+            "riskFactors": ["clean"],
+            "recommendation": "auto_approve",
+            "summary": "Low risk.",
+        },
+        "decision": {
+            "verdict": "approved",
+            "payoutAmount": 380.0,
+            "letterBody": "Dear Sarah, we are pleased to inform you...",
+            "nextSteps": ["Nothing further is needed from you."],
+            "citations": [
+                {
+                    "fact": "Policy active on the incident date",
+                    "sourceRef": "policy.status=active",
+                    "customerFriendlyExplanation": (
+                        "Your policy was active when the incident happened."
+                    ),
+                }
+            ],
+            "summary": "Approved: covered incident within limits.",
+            "confidence": 0.93,
+        },
+    }
+
+
+def test_lookup_decided_claim_returns_transparency_projection(client, patched_mongo):
+    db = patched_mongo
+    code = _make_claim(db, status="auto_approved", agent_trace=_decided_trace())
+    _seed_events(
+        db,
+        "CLM-20260917-042",
+        [("claim_submitted", {}), ("agent_complete", {"agent": "DECISION_AGENT"})],
+    )
+
+    response = _lookup(client, "CLM-20260917-042", code)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    raw = str(body)
+
+    assert body["decisionReady"] is True
+    assert body["decision"]["summary"] == "Approved: covered incident within limits."
+    assert body["decision"]["citations"][0]["customerFriendlyExplanation"] == (
+        "Your policy was active when the incident happened."
+    )
+    assert [s["stage"] for s in body["stageSummaries"]] == [
+        "intake",
+        "policy",
+        "documents",
+        "fraud",
+        "eligibility",
+        "decision",
+    ]
+    # Stage copy is pre-written (PORTAL_STAGE_COPY), not agent text.
+    assert body["stageSummaries"][1]["title"] == "Verifying your coverage"
+
+    # Deny-by-default at the endpoint: internal trace data has no path out.
+    for marker in (
+        "riskScore",
+        "adjustedPayout",
+        "payoutAmount",
+        "letterBody",
+        "confidence",
+        "fingerprint",
+        "similarity",
+        "normalizedData",
+        "citedFields",
+        "consistencyScore",
+        "redFlags",
+        "recommendation",
+        "AUTO-2024-001847",
+        "Sarah Chen",
+    ):
+        assert marker not in raw, f"internal marker leaked to endpoint: {marker}"
+
+
+def test_lookup_inflight_claim_has_no_decision_block(client, patched_mongo):
+    db = patched_mongo
+    code = _make_claim(
+        db,
+        status="pending",
+        agent_trace={"intake": {"valid": True}, "policy": {"found": True}},
+    )
+    _seed_events(
+        db,
+        "CLM-20260917-042",
+        [
+            ("claim_submitted", {}),
+            ("agent_complete", {"agent": "INTAKE_AGENT"}),
+            ("agent_start", {"agent": "POLICY_AGENT"}),
+        ],
+    )
+
+    body = _lookup(client, "CLM-20260917-042", code).json()
+    assert body["decision"] is None
+    assert body["decisionReady"] is False
+    assert [s["stage"] for s in body["stageSummaries"]] == ["intake", "policy"]
+
+
+def test_lookup_projection_ignores_new_internal_trace_field(client, patched_mongo):
+    """The deny-by-default regression at the endpoint boundary: a field added
+    to a stored trace tomorrow must not appear in the customer response."""
+    db = patched_mongo
+    trace = _decided_trace()
+    trace["policy"]["segment_risk_band"] = "ENDPOINT-LEAK-42"
+    code = _make_claim(db, status="auto_approved", agent_trace=trace)
+    _seed_events(
+        db,
+        "CLM-20260917-042",
+        [("agent_complete", {"agent": "DECISION_AGENT"})],
+    )
+
+    body = _lookup(client, "CLM-20260917-042", code).json()
+    assert "ENDPOINT-LEAK-42" not in str(body)

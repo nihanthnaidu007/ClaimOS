@@ -81,6 +81,24 @@ test('the access code from submission unlocks the live status timeline', async (
   const milestones = page.locator('[data-testid^="milestone-"]');
   const count = await milestones.count();
   expect(count, 'milestones render').toBeGreaterThan(0);
+
+  // F6 decision transparency: the deny-by-default projection renders the
+  // "Why this decision" section — pre-written stage copy, the decision's
+  // plain-language summary, and a customer citation.
+  const transparency = page.getByTestId('decision-transparency');
+  await expect(transparency).toBeVisible();
+  await expect(transparency).toContainText('Verifying your coverage');
+  await expect(transparency).toContainText('Running standard checks');
+  await expect(page.getByTestId('decision-summary')).toContainText(/decision/i);
+  await expect(page.getByTestId('decision-citation').first()).toBeVisible();
+
+  // Deny-by-default at the surface: internal adjudication data has no path
+  // into the customer portal payload.
+  const rendered = await page.content();
+  for (const marker of ['riskScore', 'adjustedPayout', 'fingerprint', 'letterBody']) {
+    expect(rendered, `internal marker must not render: ${marker}`).not.toContain(marker);
+  }
+  await saveEvidence(page, 'tc-8-portal-transparency');
   await saveEvidence(page, 'tc-8-portal-timeline');
 });
 
