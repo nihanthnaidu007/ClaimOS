@@ -64,6 +64,7 @@ class PipelineWorker:
         logger.info("worker_started worker_id=%s pid=%s", self.worker_id, os.getpid())
         while not self._stop.is_set():
             status = await self.run_once()
+            await self.sweep_escalations()
             if status is None:
                 # Nap in wait_for so a stop signal ends the idle wait instantly.
                 try:
@@ -71,6 +72,23 @@ class PipelineWorker:
                 except asyncio.TimeoutError:
                     pass
         logger.info("worker_stopped worker_id=%s", self.worker_id)
+
+    async def sweep_escalations(self) -> None:
+        """Evaluate SLA escalations between runs (spec F9).
+
+        Runs every loop iteration — between adjudications and while idle — so
+        escalations land on time whether or not the pipeline is busy. A sweep
+        failure must never stop the worker (adjudication is the primary job):
+        it is logged and retried on the next iteration.
+        """
+        from app.escalation import sweep_escalations  # local: keeps worker import order simple
+
+        try:
+            escalated = await sweep_escalations()
+            if escalated:
+                logger.info("escalation_swept count=%d claims=%s", len(escalated), escalated)
+        except Exception:  # noqa: BLE001 — never kill the worker over derived state
+            logger.exception("escalation_sweep_failed")
 
 
 async def main() -> None:

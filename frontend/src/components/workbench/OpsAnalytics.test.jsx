@@ -14,13 +14,14 @@ describe('OpsAnalytics', () => {
       expect(screen.getByTestId('ops-analytics')).toBeInTheDocument()
     );
 
-    // The six metric groups (AC-9 + F10 workload).
+    // The metric groups (F9 escalations + F10 workload included).
     expect(screen.getByTestId('ops-cycle-time')).toBeInTheDocument();
     expect(screen.getByTestId('ops-stp-rate')).toBeInTheDocument();
     expect(screen.getByTestId('ops-fraud-rate')).toBeInTheDocument();
     expect(screen.getByTestId('ops-decisions')).toBeInTheDocument();
     expect(screen.getByTestId('ops-sla')).toBeInTheDocument();
     expect(screen.getByTestId('ops-workload')).toBeInTheDocument();
+    expect(screen.getByTestId('ops-escalations')).toBeInTheDocument();
 
     // Exact fixture values: p50 54000s = 15.0h, p95 129600s = 36.0h.
     expect(screen.getByTestId('ops-cycle-p50')).toHaveTextContent('15.0h');
@@ -40,6 +41,16 @@ describe('OpsAnalytics', () => {
     expect(screen.getByTestId('ops-workload-unassigned')).toHaveTextContent(
       '2 unassigned open claims'
     );
+  });
+
+  it('renders the escalation counts (spec F9), unassigned slice included', async () => {
+    render(<OpsAnalytics />);
+
+    await waitFor(() =>
+      expect(screen.getByTestId('ops-escalations')).toBeInTheDocument()
+    );
+    expect(screen.getByTestId('ops-escalations-total')).toHaveTextContent('2');
+    expect(screen.getByTestId('ops-escalations-unassigned')).toHaveTextContent('1');
   });
 
   it('shows the empty-book notice when nothing has been processed', async () => {

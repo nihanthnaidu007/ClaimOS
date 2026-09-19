@@ -245,6 +245,15 @@ class WorkloadStats(BaseModel):
     unassigned: int
 
 
+class EscalationStats(BaseModel):
+    """SLA-escalation count group (spec F9). Counts claims carrying the set-once
+    `escalated_at` record; `unassigned` is the slice with no assignee — the only
+    surface unassigned escalations get, since no bell can target them."""
+
+    total: int
+    unassigned: int
+
+
 class OpsAnalyticsResponse(BaseModel):
     cycleTime: CycleTimeStats
     stp: StpStats
@@ -252,6 +261,7 @@ class OpsAnalyticsResponse(BaseModel):
     decisions: list[DecisionCount]
     sla: dict[str, Any]
     workload: WorkloadStats
+    escalations: EscalationStats
 
 
 # ---- Document uploads (Tier 3) ----
@@ -361,6 +371,9 @@ class WorkbenchQueueRow(BaseModel):
     fraud_flags: list[FraudFlagOut] = []
     # Current assignee (spec F10) — backs the Mine/Unassigned/All filter chips.
     assignee_id: str | None = None
+    # SLA escalation record (spec F9) — set once when the breach threshold
+    # crosses, never cleared; backs the queue badge and Escalated filter.
+    escalated_at: str | None = None
 
 
 class WorkbenchQueueResponse(BaseModel):
@@ -400,6 +413,7 @@ class CaseSummaryResponse(BaseModel):
     intakeValid: bool | None = None
     stages: list[CaseStageSummary] = []
     sla: WorkbenchSLA | None = None
+    escalatedAt: str | None = None  # spec F9 set-once escalation record
     escalationReason: str | None = None
     failureReason: str | None = None
     override: dict[str, Any] | None = None

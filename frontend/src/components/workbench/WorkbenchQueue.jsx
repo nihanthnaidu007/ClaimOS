@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Search,
   SearchX,
+  Siren,
   Timer,
   Wifi,
   WifiOff,
@@ -23,6 +24,7 @@ import { openWorkbenchStream } from '@/lib/workbenchStream';
 import {
   filtersToViewPreset,
   formatCurrency,
+  formatDateTime,
   formatHours,
   severityPresentation,
   slaBadgeText,
@@ -40,7 +42,9 @@ const SORT_OPTIONS = [
   { value: 'risk', label: 'Risk (highest first)' },
 ];
 
-const INITIAL_FILTERS = { status: '', severity: '', assignee: 'all', minAgeHours: '', maxAgeHours: '', sort: 'age', search: '' };
+// Spec F9: the escalation filter is a two-state chip — off shows everything,
+// on narrows to claims carrying the set-once escalated_at record.
+const INITIAL_FILTERS = { status: '', severity: '', assignee: 'all', escalated: '', minAgeHours: '', maxAgeHours: '', sort: 'age', search: '' };
 
 // Search goes out once typing pauses (spec F8 debounced search box).
 const SEARCH_DEBOUNCE_MS = 300;
@@ -120,6 +124,7 @@ export default function WorkbenchQueue() {
       // 'all' is the UI default and sends no param, so the unfiltered view
       // stays shareable/bookmarkable (spec F10).
       assignee: filters.assignee === 'all' ? undefined : filters.assignee,
+      escalated: filters.escalated || undefined,
       min_age_hours: filters.minAgeHours || undefined,
       max_age_hours: filters.maxAgeHours || undefined,
       sort: filters.sort,
@@ -402,6 +407,22 @@ export default function WorkbenchQueue() {
           <option value="low">Low</option>
         </select>
       </label>
+      {/* Escalation chip (spec F9): narrows to claims whose SLA escalation
+          record is set — a record, so the chip never flickers on recompute. */}
+      <button
+        type="button"
+        onClick={() => setFilter('escalated', filters.escalated ? '' : 'yes')}
+        aria-pressed={Boolean(filters.escalated)}
+        data-testid="filter-escalated"
+        className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded font-mono border transition-colors ${
+          filters.escalated
+            ? 'bg-[#ef4444] border-[#ef4444] text-[#0d1119]'
+            : 'border-[#1a1f2e] text-[#8b96ab] hover:text-[#e2e8f0]'
+        }`}
+      >
+        <Siren className="w-3 h-3" aria-hidden />
+        Escalated
+      </button>
       <label className="text-xs uppercase tracking-wider text-[#8b96ab] font-mono">
         Min age (h)
         <input
@@ -629,6 +650,19 @@ export default function WorkbenchQueue() {
                         >
                           <Flag className="w-3 h-3" aria-hidden />
                           Review ×{(row.flags || []).length}
+                        </span>
+                      )}
+                      {/* SLA escalation badge (spec F9): the set-once record,
+                          distinct from the aging pill — this breach was left to
+                          grow past its threshold. */}
+                      {row.escalated_at && (
+                        <span
+                          data-testid={`queue-escalation-badge-${row.id}`}
+                          title={`SLA escalation recorded ${formatDateTime(row.escalated_at)}`}
+                          className="inline-flex items-center gap-1 border border-[#ef4444]/40 bg-[#ef4444]/15 rounded px-1.5 py-0.5 text-[11px] font-mono font-bold uppercase text-[#ef4444]"
+                        >
+                          <Siren className="w-3 h-3" aria-hidden />
+                          Escalated
                         </span>
                       )}
                     </span>

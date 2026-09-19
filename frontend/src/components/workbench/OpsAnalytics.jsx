@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import {
-  Timer, Zap, ShieldAlert, PieChart as PieIcon, AlarmClock, RefreshCw, WifiOff, Users,
+  Timer, Zap, ShieldAlert, PieChart as PieIcon, AlarmClock, RefreshCw, WifiOff, Users, Siren,
 } from 'lucide-react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
@@ -176,7 +176,7 @@ export default function OpsAnalytics() {
     );
   }
 
-  const { cycleTime, stp, fraud, decisions, sla, workload } = analytics;
+  const { cycleTime, stp, fraud, decisions, sla, workload, escalations } = analytics;
   const isBookEmpty = fraud.totalClaims === 0 && cycleTime.decided === 0;
   const maxOpen = Math.max(...(workload?.adjusters || []).map((row) => row.openClaims), 0);
 
@@ -393,6 +393,38 @@ export default function OpsAnalytics() {
             <span data-testid="ops-workload-unassigned">
               {workload?.unassigned ?? 0} unassigned open claim{(workload?.unassigned ?? 0) === 1 ? '' : 's'}
             </span>
+          </EmptyNote>
+        </GroupCard>
+
+        {/* Group 7: SLA escalations (spec F9) — the only surface where
+            unassigned escalations appear; no bell can target them. */}
+        <GroupCard testId="ops-escalations">
+          <GroupHeader icon={Siren} color="text-[#ef4444]" title="Escalations" subtitle="SLA threshold crossed" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.15em] text-[#4a5568] font-mono">On record</div>
+              <div
+                className="text-2xl font-bold text-[#e2e8f0] font-mono"
+                style={{ fontFamily: 'JetBrains Mono' }}
+                data-testid="ops-escalations-total"
+              >
+                {escalations?.total ?? 0}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.15em] text-[#4a5568] font-mono">Unassigned</div>
+              <div
+                className="text-2xl font-bold text-[#ef4444] font-mono"
+                style={{ fontFamily: 'JetBrains Mono' }}
+                data-testid="ops-escalations-unassigned"
+              >
+                {escalations?.unassigned ?? 0}
+              </div>
+            </div>
+          </div>
+          <EmptyNote>
+            Escalation is a record, not a toggle — it is set once when a claim crosses its SLA
+            escalation threshold and is never cleared. Unassigned escalations surface only here.
           </EmptyNote>
         </GroupCard>
       </div>

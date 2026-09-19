@@ -245,6 +245,17 @@ def build_ops_analytics(
         ]
     }
 
+    # ---- SLA escalations (spec F9) ----
+    # Claims carrying the set-once escalated_at record — the record survives a
+    # later decision (clears never), so this counts escalations on record.
+    # Unassigned escalations surface HERE and nowhere else: no bell exists to
+    # ring for them, so the ops count is their only visibility.
+    escalated_rows = [claim for claim in claims if claim.get("escalated_at")]
+    escalations = {
+        "total": len(escalated_rows),
+        "unassigned": sum(1 for claim in escalated_rows if not claim.get("assignee_id")),
+    }
+
     return {
         "cycleTime": cycle_time,
         "stp": stp,
@@ -253,6 +264,8 @@ def build_ops_analytics(
         "sla": sla,
         # Spec F10: sixth group — workload per active adjuster.
         "workload": build_workload(claims, active_adjusters=active_adjusters),
+        # Spec F9: seventh group — escalation counts (unassigned included).
+        "escalations": escalations,
     }
 
 

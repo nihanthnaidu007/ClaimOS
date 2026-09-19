@@ -99,6 +99,7 @@ class QueueParams:
         direction: str = "asc",
         search: str = "",
         assignee: str = "",
+        escalated: str = "",
     ):
         self.statuses = [s.strip() for s in status.split(",") if s.strip()] or list(
             QUEUE_DEFAULT_STATUSES
@@ -110,6 +111,11 @@ class QueueParams:
         if assignee not in ("", "mine", "unassigned"):
             raise HTTPException(status_code=400, detail="assignee must be mine, unassigned, or empty")
         self.assignee = assignee
+        # SLA escalation filter (spec F9): "yes" narrows to claims carrying the
+        # set-once escalated_at record; empty shows everything.
+        if escalated not in ("", "yes"):
+            raise HTTPException(status_code=400, detail="escalated must be yes or empty")
+        self.escalated = escalated
         # Set by the routes (never parsed from the query string): the acting
         # adjuster that the "mine" chip resolves against.
         self.current_user: UserRecord | None = None
@@ -145,6 +151,11 @@ def _apply_row_filters(rows: list[dict], params: QueueParams) -> list[dict]:
         filtered = [row for row in filtered if row.get("assignee_id") == params.current_user.id]
     elif params.assignee == "unassigned":
         filtered = [row for row in filtered if not row.get("assignee_id")]
+    # Escalation filter (spec F9): matches the persisted set-once record, so a
+    # claim stays "Escalated" until someone acts on it — never toggled by a
+    # recomputation.
+    if params.escalated:
+        filtered = [row for row in filtered if row.get("escalated_at")]
     return filtered
 
 
@@ -192,6 +203,7 @@ def queue_digest(rows: list[dict]) -> str:
             row["sla"]["state"],
             round(row["sla"]["hoursElapsed"], 1),
             row.get("assignee_id") or "",  # spec F10: reassignment refetches
+            bool(row.get("escalated_at")),  # spec F9: escalation refetches
         ]
         for row in rows
     ]
