@@ -22,7 +22,7 @@ const MAX_BACKOFF_MS = 15_000;
 const MAX_CONNECT_ATTEMPTS = 8;
 
 // Full jitter (uniform in [0, cap]) — spread reconnects instead of stampeding.
-export function backoffDelay(attempt, random = Math.random) {
+function backoffDelay(attempt, random = Math.random) {
   const cap = Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
   return Math.round(random() * cap);
 }
@@ -31,7 +31,7 @@ export function backoffDelay(attempt, random = Math.random) {
 // partial frame as remainder for the next chunk. Comment lines (`: heartbeat`)
 // are dropped, `id:` sets the frame's resume cursor, and `data:` lines
 // accumulate (the SSE spec allows multiple data lines per frame).
-export function parseSseChunk(text, { lastEventId = null } = {}) {
+function parseSseChunk(text, { lastEventId = null } = {}) {
   const events = [];
   let cursor = lastEventId;
   let dataLines = [];

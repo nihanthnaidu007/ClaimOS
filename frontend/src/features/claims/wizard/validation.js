@@ -61,7 +61,7 @@ export function validateHolder(draft, lookup) {
   return errors;
 }
 
-export const STEP_VALIDATORS = [validateIncident, validateHolder, () => ({})];
+const STEP_VALIDATORS = [validateIncident, validateHolder, () => ({})];
 
 // Which step a field belongs to — draft resume scrolls to the first invalid one.
 export function firstInvalidStep(draft, lookup) {

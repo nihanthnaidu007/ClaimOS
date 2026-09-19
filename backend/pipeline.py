@@ -38,10 +38,6 @@ RUN_ESCALATED = "escalated"
 RUN_FAILED = "failed"
 RUN_HALTED = "halted"
 
-TERMINAL_RUN_STATUSES = frozenset(
-    {RUN_AUTO_APPROVED, RUN_ESCALATED, RUN_FAILED, RUN_HALTED}
-)
-
 # Claim-row status per terminal run status (halts keep the pre-decision
 # "pending" status the original pipeline used).
 _CLAIM_STATUS_BY_RUN = {

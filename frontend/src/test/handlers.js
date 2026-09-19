@@ -30,7 +30,7 @@ export const dashboardStats = {
   ],
 };
 
-export const sessionUser = {
+const sessionUser = {
   id: 'usr_test1',
   email: 'adjuster@claimos.dev',
   role: 'adjuster',

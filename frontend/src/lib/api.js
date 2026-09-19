@@ -29,7 +29,7 @@ export function onUnauthorized(handler) {
   unauthorizedHandler = handler;
 }
 
-export function readCsrfCookie() {
+function readCsrfCookie() {
   const match = document.cookie.match(/(?:^|;\s*)claimos_csrf=([^;]*)/);
   return match ? decodeURIComponent(match[1]) : '';
 }

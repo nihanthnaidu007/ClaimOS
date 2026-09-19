@@ -172,7 +172,7 @@ describe('CaseView', () => {
     // is mocked at the axios seam; the real wire is covered by browser dogfood.
     const postSpy = vi.spyOn(api, 'post').mockResolvedValue({ data: uploadedDoc });
     server.use(
-      http.get(`${API_BASE}/claims/CLM-1001/documents`, ({ request }) => {
+      http.get(`${API_BASE}/claims/CLM-1001/documents`, () => {
         const after = postSpy.mock.calls.length > 0;
         return HttpResponse.json(after ? [uploadedDoc] : []);
       })

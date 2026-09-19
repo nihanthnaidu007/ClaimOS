@@ -15,7 +15,7 @@ const VERDICT_CONFIG = {
 };
 
 // Map a persisted claim status onto the verdict banner.
-export function verdictConfigFor(status, verdict) {
+function verdictConfigFor(status, verdict) {
   if (VERDICT_CONFIG[verdict]) return VERDICT_CONFIG[verdict];
   if (status === 'auto_approved') return VERDICT_CONFIG.approved;
   if (status === 'escalated') return VERDICT_CONFIG.escalate;

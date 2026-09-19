@@ -24,7 +24,7 @@ function statusMeta(status) {
 
 // Compact summary of an agent's persisted output — findings-first, not a raw
 // JSON dump. Unknown shapes fall back to a truncated JSON rendering.
-export function summarizeOutput(output) {
+function summarizeOutput(output) {
   if (!output || typeof output !== 'object') return [];
   const facts = [];
   for (const [key, value] of Object.entries(output)) {

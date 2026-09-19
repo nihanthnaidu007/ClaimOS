@@ -80,10 +80,6 @@ class ReviewFlag(BaseModel):
     flagged_at: str = ""
 
 
-# Settlement methods are a closed vocabulary: reports group on this field.
-SETTLEMENT_METHODS = ("bank_transfer", "cheque", "upi", "other")
-
-
 class SettlementCreate(BaseModel):
     """Record-only settlement facts. No money moves here by design (spec:
     real payment rails are out of scope); this is the system of record."""
@@ -219,14 +215,6 @@ class FraudFlagStats(BaseModel):
 class DecisionCount(BaseModel):
     status: str
     count: int
-
-
-class SlaSeverityStats(BaseModel):
-    severity: str
-    slaHours: float
-    decided: int
-    breaches: int
-    breachRate: float
 
 
 class AdjusterWorkload(BaseModel):

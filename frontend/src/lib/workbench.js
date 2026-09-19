@@ -102,7 +102,7 @@ export function formatDuration(ms) {
 
 // Statuses a human still has to act on — mirrors backend REVIEWABLE_STATUSES.
 // "reopened" (F14) is a review state: the claim needs a new decision.
-export const REVIEWABLE_STATUSES = ['escalated', 'pending', 'reopened', 'under_review'];
+const REVIEWABLE_STATUSES = ['escalated', 'pending', 'reopened', 'under_review'];
 
 export function isReviewable(status) {
   return REVIEWABLE_STATUSES.includes(status);

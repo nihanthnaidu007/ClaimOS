@@ -41,10 +41,6 @@ class PipelineWorker:
         logger.info("worker_stop_requested worker_id=%s", self.worker_id)
         self._stop.set()
 
-    @property
-    def stop_requested(self) -> bool:
-        return self._stop.is_set()
-
     async def run_once(self) -> str | None:
         """Claim and execute one run; returns its terminal status (None = idle)."""
         run_doc = await claim_next_run(self.worker_id)
