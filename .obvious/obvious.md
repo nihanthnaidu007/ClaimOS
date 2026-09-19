@@ -55,10 +55,10 @@ Health checks: `GET /api/` → `{"status":"ok","service":"ClaimOS API","agents":
 1. **backend-ruff** — `ruff check backend tests` (ruff pinned 0.16.8; config in `backend/pyproject.toml`, select E4/E7/E9/F)
 2. **backend-pytest** — `pytest tests/ backend/tests/ -v` (mongo:7 service sidecar; mongomock keeps the suite hermetic)
 3. **frontend-lint** — npm ci; there is no `lint` script in package.json, so the job falls back to `npx eslint .` (committed `eslint.config.js`)
-4. **frontend-test** — `CI=true npm test` (Vitest + Testing Library + MSW, 17 suites)
+4. **frontend-test** — `CI=true npm test` (Vitest + Testing Library + MSW, 29 suites)
 5. **docker-builds** — backend + frontend images (GHCR push on main)
 6. **security-audit** — pip-audit and `npm audit --omit=dev`, both blocking
-7. **e2e-compose** — boots the compose stack on `LLM_PROVIDER=fixture`, waits for `/api/ready` and the web tier, runs the 8 Playwright specs (17 tests), then two fault phases recreate the worker with `FIXTURE_FAULT=timeout:intake` (agent-failure spec) and `FIXTURE_FAULT=refusal:decision` (refusal-fallback spec)
+7. **e2e-compose** — boots the compose stack on `LLM_PROVIDER=fixture`, waits for `/api/ready` and the web tier, runs the 9 Playwright specs (20 tests, 3 of them fault-gated), then two fault phases recreate the worker with `FIXTURE_FAULT=timeout:intake` (agent-failure spec) and `FIXTURE_FAULT=refusal:decision` (refusal-fallback spec)
 8. **lint-workflows** — actionlint 1.7.12
 
 QA evidence: `docs/acceptance.md` maps AC-1..AC-13 to the tests and screenshots that prove them; UI PRs record evidence at the tested head SHA (`obvious autobuild upload`), and CI uploads Playwright artifacts on failure.
@@ -69,7 +69,7 @@ See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (F
 
 ## Local verification
 
-- Backend tests: `pytest tests/ backend/tests/` — 515 passed, no live MongoDB needed (mongomock-motor). Verified 2026-09-19 on `feat/claim-messaging` (rebased on main) with the sandbox venv `/home/user/venv-claimos` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution.
+- Backend tests: `pytest tests/ backend/tests/` — 607 passed, no live MongoDB needed (mongomock-motor). Verified 2026-09-19 in the Wave 1–2 integration sweep on main post-#54 with the sandbox venv `/home/user/venv-verify` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution; 238 tests in 29 files green.
 - Backend lint: `ruff check backend tests` (flake8 is gone; ruff config in `backend/pyproject.toml`).
 - Frontend unit: `cd frontend && npm test`; frontend lint: `cd frontend && npx eslint .`
 - E2E: fixture-mode compose stack + `cd frontend && npx playwright test`

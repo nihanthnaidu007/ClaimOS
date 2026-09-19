@@ -241,6 +241,43 @@ async def test_full_run_checkpoints_usage_and_finalizes(monkeypatch, patched_mon
     assert names[-1] == "run_finalized"
 
 
+async def test_rollup_preserves_assignment_and_escalation_fields(monkeypatch, patched_mongo):
+    """The worker rollup owns the pipeline's write set, not the whole claim row.
+
+    The API's FNOL insert writes the F10 assignment block before the run is
+    enqueued, and the escalation sweep may set F9's escalated_at while a run
+    is in flight. _save_claim's replace_one must carry both across, or every
+    adjudicated claim silently unassigns itself (queue chips, workload
+    analytics, assignee-only escalation bells all read those fields).
+    """
+    await _seed_policy()
+    _install_adapter(monkeypatch, CLEAN_OUTPUTS)
+    await enqueue_claim_run("CLM-ASSIGN-1", dict(SUBMISSION))
+    # Simulate the API's $setOnInsert (F10: born with its owner) plus a sweep
+    # escalation record (F9 set-once) already present when the rollup runs.
+    await database.claims_col.insert_one(
+        {
+            "id": "CLM-ASSIGN-1",
+            "assignee_id": "usr_adjuster_1",
+            "assigned_at": "2026-09-19T00:00:00+00:00",
+            "assigned_by": "auto_round_robin",
+            "escalated_at": "2026-09-19T00:05:00+00:00",
+            "status": "pending",
+        }
+    )
+    claimed = await claim_next_run("worker-a")
+    assert claimed is not None
+
+    await PipelineRunner(claimed).run()
+
+    claim = await database.claims_col.find_one({"id": "CLM-ASSIGN-1"})
+    assert claim["status"] == RUN_AUTO_APPROVED
+    assert claim["assignee_id"] == "usr_adjuster_1"
+    assert claim["assigned_at"] == "2026-09-19T00:00:00+00:00"
+    assert claim["assigned_by"] == "auto_round_robin"
+    assert claim["escalated_at"] == "2026-09-19T00:05:00+00:00"
+
+
 async def test_stp_escalates_low_confidence_with_reason(monkeypatch, patched_mongo):
     """A failing gate leg escalates and names the reason."""
     await _seed_policy()

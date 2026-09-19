@@ -493,6 +493,24 @@ class PipelineRunner:
             claim_doc["escalation_reason"] = self.run_doc["escalation_reason"]
             claim_doc["stp"] = self.run_doc.get("stp")
 
+        # The rollup owns the pipeline's write set, not the whole row: fields
+        # other surfaces own — the F10 assignment block (the claim is born
+        # with its owner) and the F9 set-once escalation record — must
+        # survive the replace, or every adjudicated claim silently unassigns
+        # itself and the sweep's escalation record is lost.
+        prior = await database.claims_col.find_one(
+            {"id": self.claim_id},
+            {"assignee_id": 1, "assigned_at": 1, "assigned_by": 1, "escalated_at": 1},
+        )
+        if prior:
+            claim_doc.update(
+                {
+                    field: prior[field]
+                    for field in ("assignee_id", "assigned_at", "assigned_by", "escalated_at")
+                    if field in prior
+                }
+            )
+
         doc_text = self.state["input"].get("documentText", "")
         if doc_text:
             already = await database.claim_documents_col.count_documents(
