@@ -237,9 +237,21 @@ def settlement_card(claim: dict) -> dict | None:
     return card or None
 
 
+_PUBLIC_REQUEST_FIELDS = ("id", "title", "description", "status")
+
+
+def public_document_requests(rows: list[dict]) -> list[dict]:
+    """Project stored document requests onto the portal's field allowlist."""
+    return [
+        {field: row.get(field, "") for field in _PUBLIC_REQUEST_FIELDS}
+        for row in rows
+    ]
+
+
 def public_status_payload(
     claim: dict,
     events: list[dict],
+    document_requests: list[dict] | None = None,
     *,
     now: datetime | None = None,
 ) -> dict:
@@ -276,6 +288,8 @@ def public_status_payload(
         "stageSummaries": [s.model_dump() for s in projection.stage_summaries],
         "decision": projection.decision.model_dump() if projection.decision else None,
         "messagesEnabled": True,
+        # F4: the customer's own document to-do list, allowlisted fields only.
+        "documentRequests": public_document_requests(document_requests or []),
     }
     eta = expected_resolution(claim, now=now)
     if eta is not None:

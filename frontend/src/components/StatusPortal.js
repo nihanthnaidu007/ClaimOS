@@ -6,6 +6,7 @@ import StatusTimeline from '@/components/StatusTimeline';
 import NextStepsCard from '@/components/NextStepsCard';
 import PortalMessageThread from '@/components/PortalMessageThread';
 import { resolveApiBase } from '@/lib/apiBase';
+import PortalDocumentRequests from '@/components/PortalDocumentRequests';
 
 // resolveApiBase keeps same-origin deploys working when VITE_API_BASE_URL is
 // empty OR unset — raw interpolation would produce "undefined/api/...".
@@ -57,6 +58,17 @@ export default function StatusPortal() {
     }
   };
 
+  // Silent re-lookup that keeps the last known state on failure — the poller
+  // and the post-upload refresh (F4 card flips to received) both use it.
+  const refreshStatus = async (creds) => {
+    try {
+      const res = await axios.post(`${API}/status/lookup`, creds);
+      setStatus(res.data);
+    } catch {
+      // Transient failure — keep the last known state, retry next tick.
+    }
+  };
+
   // Live milestone updates: while a looked-up claim's timeline is incomplete,
   // re-check quietly every 10s (6 lookups/min — well under the per-IP rate
   // limit). A failed poll keeps the last known timeline; the next tick retries
@@ -65,14 +77,7 @@ export default function StatusPortal() {
     if (!status || !credentials) return undefined;
     const milestones = status.milestones || [];
     if (milestones.length > 0 && milestones.every((m) => m.done)) return undefined;
-    const id = setInterval(async () => {
-      try {
-        const res = await axios.post(`${API}/status/lookup`, credentials);
-        setStatus(res.data);
-      } catch {
-        // Transient poll failure — keep the last known state, retry next tick.
-      }
-    }, 10000);
+    const id = setInterval(() => refreshStatus(credentials), 10000);
     return () => clearInterval(id);
   }, [status, credentials]);
 
@@ -194,7 +199,16 @@ export default function StatusPortal() {
           />
         )}
 
-        {status && <StatusTimeline status={status} onDownloadLetter={downloadLetter} downloading={downloading} />}
+        {status && (
+          <>
+            <StatusTimeline status={status} onDownloadLetter={downloadLetter} downloading={downloading} />
+            <PortalDocumentRequests
+              credentials={credentials}
+              requests={status.documentRequests}
+              onUploaded={() => credentials && refreshStatus(credentials)}
+            />
+          </>
+        )}
 
         {status?.messagesEnabled && credentials ? (
           <PortalMessageThread

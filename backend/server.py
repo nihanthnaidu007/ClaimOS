@@ -51,6 +51,8 @@ from app.schemas import (
     SubmitClaimResponse,
     UploadedDocumentResponse,
 )
+from app.portal_uploads import router as portal_uploads_router
+from app.uploads import read_validated_upload
 from app.workbench_routes import router as workbench_router
 from app import letter_templates as letter_templates_module
 from app.status_portal import access_code_hash, generate_access_code
@@ -59,7 +61,7 @@ from app.messages_routes import router as messages_router
 from app.notify_routes import router as notify_router
 from app.notes_routes import router as notes_router
 from app.notifications.emails import send_access_code_email
-from app.storage import get_provider, new_storage_key, sanitize_filename
+from app.storage import get_provider, new_storage_key
 from agents import PIPELINE_STAGES
 from database import (
     audit_log_col,
@@ -339,14 +341,6 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _upload_content_type_allowlist() -> set[str]:
-    return {
-        part.strip().lower()
-        for part in settings.upload_allowed_content_types.split(",")
-        if part.strip()
-    }
-
-
 @api_router.post(
     "/claims/{claim_id}/documents",
     response_model=UploadedDocumentResponse,
@@ -370,30 +364,10 @@ async def upload_claim_document(
     if not claim:
         raise HTTPException(status_code=404, detail="Claim not found")
 
-    content_type = (file.content_type or "").split(";")[0].strip().lower()
-    if content_type not in _upload_content_type_allowlist():
-        raise HTTPException(
-            status_code=415,
-            detail=f"Unsupported content type: {content_type or 'unknown'}. "
-            f"Allowed: {settings.upload_allowed_content_types}",
-        )
-
-    max_bytes = settings.upload_max_bytes
-    chunks: list[bytes] = []
-    total = 0
-    while chunk := await file.read(1024 * 1024):
-        total += len(chunk)
-        if total > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds the {max_bytes} byte upload cap",
-            )
-        chunks.append(chunk)
-    content = b"".join(chunks)
-    if total == 0:
-        raise HTTPException(status_code=422, detail="Uploaded file is empty")
-
-    file_name = sanitize_filename(file.filename)
+    # Shared validation (app.uploads): 415 on a non-allowlisted type, 413 over
+    # the cap, 422 for an empty body — the same contract the customer portal
+    # upload enforces.
+    content, content_type, file_name = await read_validated_upload(file)
     storage_key = new_storage_key(claim_id, file_name)
     stored = await get_provider().save(
         key=storage_key, content=content, content_type=content_type
@@ -622,6 +596,7 @@ async def ready():
 api_router.include_router(auth_router)  # /auth/* under the /api prefix
 api_router.include_router(workbench_router)  # adjuster-gated workbench under /api
 api_router.include_router(status_router)  # /status/* public portal endpoints
+api_router.include_router(portal_uploads_router)  # /status/upload-document customer uploads (spec F4)
 api_router.include_router(notify_router)  # /notifications/* authenticated
 
 api_router.include_router(messages_router)  # claim message threads (F5)

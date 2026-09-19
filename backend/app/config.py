@@ -84,6 +84,9 @@ class Settings(BaseSettings):
     # Access-code recovery (F1): stricter than status lookup because a match
     # triggers a real email (address-harvesting / mail-bomb vector).
     access_code_recovery_rate_limit: str = "3/minute"
+    # F4 customer portal uploads per client IP — uploads are heavier than
+    # lookups, so this matches the FNOL budget rather than the lookup one.
+    portal_upload_rate_limit: str = "10/minute"
 
     # F5 claim messaging: portal send/list rate limit (own constant, per
     # client IP) and the plain-text body cap enforced in app.claim_messages.

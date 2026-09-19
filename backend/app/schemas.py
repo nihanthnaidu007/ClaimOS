@@ -615,6 +615,16 @@ class CustomerSettlementCard(BaseModel):
     settledAt: Optional[str] = None
 
 
+class PortalDocumentRequest(BaseModel):
+    """Customer-visible document-request projection (spec F4): the ask and
+    its lifecycle state only — adjuster-only fields never reach the portal."""
+
+    id: str
+    title: str
+    description: str = ""
+    status: str
+
+
 class StatusLookupResponse(BaseModel):
     """Masked portal payload: first name + claim status are the only identity
     data; amounts, contact details, and policy numbers never appear."""
@@ -649,6 +659,8 @@ class StatusLookupResponse(BaseModel):
     # wire behavior as expectedResolution), and the card carries only record
     # fields that exist: no invented payment-method or fee data.
     settlement: Optional[CustomerSettlementCard] = None
+    # F4: customer-visible document requests (allowlisted fields only).
+    documentRequests: list[PortalDocumentRequest] = []
 
 
 class StatusLetterResponse(BaseModel):
