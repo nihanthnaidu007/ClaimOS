@@ -9,9 +9,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+# Collection name's source of truth is database.py (which indexes the
+# collection); imported here rather than re-declared so the two can't drift.
+# database.py never imports this module, so the graph stays acyclic.
+from database import LLM_USAGE_COLLECTION
+
 logger = logging.getLogger(__name__)
 
-USAGE_COLLECTION = "llm_usage"
+USAGE_COLLECTION = LLM_USAGE_COLLECTION
 
 
 class UsageLogger:
@@ -51,7 +56,7 @@ class UsageLogger:
             "latency_ms": int(latency_ms),
             "claim_id": claim_id,
             "call_type": call_type,
-            "logged_at": datetime.now(timezone.utc).isoformat(),
+            "logged_at": datetime.now(timezone.utc),
         }
         try:
             collection = self.collection

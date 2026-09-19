@@ -10,6 +10,7 @@ a fixed neutral response regardless of whether anything matched, so it cannot
 be used to discover which claim numbers or emails exist.
 """
 
+import asyncio
 from typing import Literal
 
 import re as _re
@@ -140,7 +141,8 @@ async def download_decision_letter(request: Request, payload: StatusLetterReques
     if policy_doc:
         state["policy"]["policyData"] = policy_doc
 
-    pdf_base64 = generate_claim_pdf(state)
+    # fpdf2 rendering is CPU-bound and synchronous — keep it off the event loop.
+    pdf_base64 = await asyncio.to_thread(generate_claim_pdf, state)
     return {"pdf": pdf_base64, "claimId": claim["id"]}
 
 

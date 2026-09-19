@@ -1,0 +1,13 @@
+# Development/test-only dependencies. The runtime image installs only
+# requirements.txt — keep test tooling out of production.
+# Pinned transitives (pytest → iniconfig/pluggy/pygments, mongomock → sentinels)
+# follow the repo's fully-pinned requirements convention so pip-audit sees them.
+iniconfig==2.3.0
+mongomock-motor==0.0.36
+mongomock==4.3.0
+pluggy==1.6.0
+pygments==2.21.0
+pytest-asyncio==1.4.0
+pytest==9.1.1
+ruff==0.16.8
+sentinels==1.1.1

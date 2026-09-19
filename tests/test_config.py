@@ -15,7 +15,7 @@ from pydantic import ValidationError
 BACKEND_DIR = Path(__file__).resolve().parent.parent / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.config import Settings
+from app.config import INSECURE_DEV_JWT_SECRET, Settings
 
 
 def test_production_boot_fails_with_wildcard_cors():
@@ -84,3 +84,39 @@ def test_development_boots_without_email_plan():
     settings = Settings()  # environment defaults to development
     assert settings.email_provider == "console"
     assert settings.email_disabled is False
+
+
+def test_production_boot_fails_with_dev_default_jwt_secret(monkeypatch):
+    """The dev fallback secret is public in the repo: production refuses it.
+
+    The field default is a non-empty string, so a guard that only rejects
+    empty values would let production boot with a known signing key when
+    JWT_SECRET is simply unset.
+    """
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    with pytest.raises(ValidationError) as excinfo:
+        Settings(
+            environment="production",
+            cors_origins=["https://claims.example.com"],
+            email_disabled=True,
+        )
+    assert "JWT_SECRET must be set to a real secret" in str(excinfo.value)
+
+
+def test_production_boots_with_real_jwt_secret(monkeypatch):
+    """A genuinely set secret still passes the production guard."""
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    settings = Settings(
+        environment="production",
+        jwt_secret="0f31c9ab-real-secret-not-the-dev-default",
+        cors_origins=["https://claims.example.com"],
+        email_disabled=True,
+    )
+    assert settings.jwt_secret == "0f31c9ab-real-secret-not-the-dev-default"
+
+
+def test_development_keeps_dev_default_jwt_secret(monkeypatch):
+    """JWT_SECRET-less dev boots keep working (pyjwt rejects empty keys)."""
+    monkeypatch.delenv("JWT_SECRET", raising=False)
+    settings = Settings()
+    assert settings.jwt_secret == INSECURE_DEV_JWT_SECRET

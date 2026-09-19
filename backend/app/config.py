@@ -14,6 +14,11 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 # backend/app/config.py -> backend/
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
+# Public-in-repo development fallback for jwt_secret. Production refuses both
+# an empty secret and this exact value — a known signing key must never sign
+# production tokens.
+INSECURE_DEV_JWT_SECRET = "dev-only-insecure-jwt-secret-change-me"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -51,8 +56,9 @@ class Settings(BaseSettings):
     # environment; the validator below fails boot in production when empty.
     # Development falls back to an obviously-non-production secret: pyjwt
     # >= 2.13 raises InvalidKeyError on an empty HMAC key, which turned every
-    # login in a JWT_SECRET-less environment into a 500.
-    jwt_secret: str = "dev-only-insecure-jwt-secret-change-me"
+    # Dev fallback so a JWT_SECRET-less dev boot does not turn every login
+    # into a 500. Production refuses this value — it is public in the repo.
+    jwt_secret: str = INSECURE_DEV_JWT_SECRET
     # Short-lived access token held in browser memory (never persisted client-side).
     access_token_ttl_minutes: int = 15
     # Long-lived refresh token: opaque random value, stored SHA-256-hashed
@@ -142,8 +148,12 @@ class Settings(BaseSettings):
     @field_validator("jwt_secret")
     @classmethod
     def _reject_empty_secret_in_production(cls, value: str, info) -> str:
-        if info.data.get("environment") == "production" and not value:
-            raise ValueError("JWT_SECRET must be set when ENVIRONMENT=production")
+        if info.data.get("environment") == "production" and (
+            not value or value == INSECURE_DEV_JWT_SECRET
+        ):
+            raise ValueError(
+                "JWT_SECRET must be set to a real secret when ENVIRONMENT=production"
+            )
         return value
     # Straight-through-processing gate. A claim whose Decision agent reports
     # confidence >= stp_confidence_threshold, with low derived severity and a
