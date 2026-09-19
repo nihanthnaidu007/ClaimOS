@@ -52,6 +52,7 @@ from app.schemas import (
     UploadedDocumentResponse,
 )
 from app.workbench_routes import router as workbench_router
+from app import letter_templates as letter_templates_module
 from app.status_portal import access_code_hash, generate_access_code
 from app.status_routes import router as status_router
 from app.notify_routes import router as notify_router
@@ -248,7 +249,9 @@ async def get_claim(
 
 @api_router.get("/claims/{claim_id}/pdf", response_model=ClaimPdfResponse)
 async def get_claim_pdf(
-    claim_id: str, current_user: UserRecord = Depends(require_adjuster)
+    claim_id: str,
+    template_id: str | None = None,
+    current_user: UserRecord = Depends(require_adjuster),
 ):
     claim = await claims_col.find_one({"id": claim_id}, {"_id": 0})
     if not claim:
@@ -270,6 +273,21 @@ async def get_claim_pdf(
     policy_doc = await policies_col.find_one({"policy_number": policy_number}, {"_id": 0})
     if policy_doc:
         state["policy"]["policyData"] = policy_doc
+
+    # Spec F13: ?template_id= renders that letter template (the seeded
+    # default when omitted) into the letter state the PDF draws.
+    if template_id:
+        template_row = await letter_templates_module.get_letter_template(template_id)
+        if template_row is None:
+            raise HTTPException(status_code=404, detail="Template not found")
+        rendered = letter_templates_module.render_letter(
+            template_row.get("subject", ""),
+            template_row.get("body", ""),
+            letter_templates_module.build_merge_context(claim),
+        )
+        state.setdefault("decision", {})
+        state["decision"]["letterSubject"] = rendered["subject"]
+        state["decision"]["letterBody"] = rendered["body"]
 
     pdf_base64 = generate_claim_pdf(state)
     return {"pdf": pdf_base64, "claimId": claim_id}
@@ -634,6 +652,7 @@ app.add_middleware(RequestIdMiddleware)
 async def startup():
     await seed_database()
     await seed_demo_users()
+    await letter_templates_module.ensure_default_template()
     logger.info("claimos_api_ready", environment=settings.environment, agents=5)
 
 

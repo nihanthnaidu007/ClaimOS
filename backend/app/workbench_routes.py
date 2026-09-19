@@ -31,8 +31,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import database
+from app import letter_templates as letter_templates_module
 from app.assignment import assignment_fields
 from app.config import settings
+from app.counters import next_sequence
 from app.deps import UserRecord, require_adjuster
 from app.events import emit_event, get_claim_events
 from app.rate_limit import limiter
@@ -42,6 +44,11 @@ from app.schemas import (
     BulkActionResponse,
     BulkActionResultItem,
     CaseSummaryResponse,
+    LetterPreviewRequest,
+    LetterPreviewResponse,
+    LetterTemplateListResponse,
+    LetterTemplateOut,
+    LetterTemplateWrite,
     OverrideRequest,
     OverrideResponse,
     ReassignRequest,
@@ -734,3 +741,197 @@ async def bulk_claims_action(
     return BulkActionResponse(
         action=body.action, results=results, updated=updated, failed=failed
     )
+
+# ---- Decision-letter templates (spec F13) ----
+#
+# CRUD is adjuster-gated and every mutation appends an audit row with
+# before/after snapshots (claim_id=None: templates have no claim scope).
+# The default template cannot be deleted -- decision letters must always
+# have a template to render from.
+
+
+def _template_row_to_out(row: dict) -> dict:
+    created, updated = row.get("created_at") or "", row.get("updated_at") or ""
+    return {
+        "id": row.get("id", ""),
+        "name": row.get("name", ""),
+        "description": row.get("description", ""),
+        "subject": row.get("subject", ""),
+        "body": row.get("body", ""),
+        "isDefault": bool(row.get("is_default")),
+        "createdAt": created,
+        "updatedAt": updated,
+    }
+
+
+@router.get("/letter-templates", response_model=LetterTemplateListResponse)
+async def list_letter_templates():
+    templates = await letter_templates_module.list_letter_templates()
+    return {"templates": [_template_row_to_out(row) for row in templates]}
+
+
+async def _audit_template_action(
+    adjuster: UserRecord,
+    action: str,
+    before: dict | None,
+    after: dict | None,
+    reason: str,
+) -> None:
+    """Audit-log one template CRUD action (claim_id=None -- no claim scope)."""
+    await _append_audit_entry(
+        {
+            "claim_id": None,
+            "actor": adjuster.id,
+            "actor_email": adjuster.email,
+            "action": action,
+            "before": before or {},
+            "after": after or {},
+            "reason": reason,
+            "at": _now_iso(),
+        }
+    )
+
+
+def _is_default(row: dict) -> bool:
+    return row.get("id") == letter_templates_module.DEFAULT_TEMPLATE_ID or bool(
+        row.get("is_default")
+    )
+
+
+@router.post(
+    "/letter-templates",
+    response_model=LetterTemplateOut,
+    status_code=201,
+)
+async def create_letter_template(
+    payload: LetterTemplateWrite, adjuster: UserRecord = Depends(require_adjuster)
+):
+    seq = await next_sequence("letter_templates")
+    template_id = f"ltpl_{seq:04d}"
+    now = _now_iso()
+    row = {
+        "id": template_id,
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+        "subject": payload.subject,
+        "body": payload.body,
+        "is_default": False,
+        "created_at": now,
+        "updated_at": now,
+    }
+    await database.letter_templates_col.insert_one(dict(row))
+    await _audit_template_action(
+        adjuster,
+        "letter_template_created",
+        None,
+        {"id": template_id, "name": row["name"], "subject": row["subject"]},
+        "Created letter template",
+    )
+    logger.info("letter_template.created", template_id=template_id)
+    return _template_row_to_out(row)
+
+
+@router.put("/letter-templates/{template_id}", response_model=LetterTemplateOut)
+async def update_letter_template(
+    template_id: str,
+    payload: LetterTemplateWrite,
+    adjuster: UserRecord = Depends(require_adjuster),
+):
+    existing = await letter_templates_module.get_letter_template(template_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    updates = {
+        "name": payload.name.strip(),
+        "description": payload.description.strip(),
+        "subject": payload.subject,
+        "body": payload.body,
+        "updated_at": _now_iso(),
+    }
+    await database.letter_templates_col.update_one(
+        {"id": template_id}, {"$set": updates}
+    )
+    row = {**existing, **updates}
+    await _audit_template_action(
+        adjuster,
+        "letter_template_updated",
+        {
+            "id": template_id,
+            "name": existing.get("name", ""),
+            "subject": existing.get("subject", ""),
+            "body": existing.get("body", ""),
+        },
+        {
+            "id": template_id,
+            "name": row["name"],
+            "subject": row["subject"],
+            "body": row["body"],
+        },
+        "Updated letter template",
+    )
+    logger.info("letter_template.updated", template_id=template_id)
+    return _template_row_to_out(row)
+
+
+@router.delete("/letter-templates/{template_id}")
+async def delete_letter_template(
+    template_id: str, adjuster: UserRecord = Depends(require_adjuster)
+):
+    existing = await letter_templates_module.get_letter_template(template_id)
+    if existing is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    if _is_default(existing):
+        raise HTTPException(
+            status_code=409,
+            detail="The default decision-letter template cannot be deleted",
+        )
+    await database.letter_templates_col.delete_one({"id": template_id})
+    await _audit_template_action(
+        adjuster,
+        "letter_template_deleted",
+        {
+            "id": template_id,
+            "name": existing.get("name", ""),
+            "subject": existing.get("subject", ""),
+        },
+        None,
+        "Deleted letter template",
+    )
+    logger.info("letter_template.deleted", template_id=template_id)
+    return {"deleted": template_id}
+
+
+@router.post(
+    "/claims/{claim_id}/letter/preview", response_model=LetterPreviewResponse
+)
+async def preview_letter(
+    claim_id: str,
+    payload: LetterPreviewRequest | None = None,
+    adjuster: UserRecord = Depends(require_adjuster),
+):
+    """Render the letter for review -- strictly read-only: no persistence,
+    no claim mutation, no audit write (spec F13)."""
+    claim = await _claim_or_404(claim_id)
+    requested_id = (payload.templateId if payload else None) or (
+        letter_templates_module.DEFAULT_TEMPLATE_ID
+    )
+    row = await letter_templates_module.get_letter_template(requested_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Template not found")
+    context = letter_templates_module.build_merge_context(claim)
+    rendered = letter_templates_module.render_letter(
+        row.get("subject", ""), row.get("body", ""), context
+    )
+    logger.info(
+        "letter.preview.rendered",
+        claim_id=claim_id,
+        template_id=requested_id,
+        warnings=rendered["warnings"],
+    )
+    return {
+        "claimId": claim_id,
+        "templateId": requested_id,
+        "templateName": row.get("name", ""),
+        "subject": rendered["subject"],
+        "body": rendered["body"],
+        "warnings": rendered["warnings"],
+    }
