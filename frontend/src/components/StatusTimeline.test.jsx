@@ -86,6 +86,54 @@ describe('StatusTimeline', () => {
     expect(screen.queryByText('+1-555-0100')).not.toBeInTheDocument();
     expect(screen.queryByText('AUTO-2024-001847')).not.toBeInTheDocument();
   });
+
+  // F14 reopen flow: the chip swaps to "Being reviewed again", the status note
+  // tells the customer their claim is under review again, and a conditional
+  // reopened milestone completes the timeline.
+  it('renders the reopened status with the being-reviewed-again note', () => {
+    renderTimeline({
+      status: 'reopened',
+      statusLabel: 'Being reviewed again',
+      statusMessage: "Your claim is being reviewed again — we'll keep you updated as it progresses.",
+      currentStage: null,
+      milestones: [
+        ...basePayload.milestones,
+        {
+          key: 'reopened',
+          label: 'Claim reopened — under review again',
+          done: true,
+          at: '2026-09-18T11:00:00+00:00',
+        },
+      ],
+    });
+
+    expect(screen.getByTestId('status-badge')).toHaveTextContent('Being reviewed again');
+    expect(screen.getByTestId('status-message')).toHaveTextContent(
+      /your claim is being reviewed again/i
+    );
+    expect(screen.getByTestId('milestone-reopened')).toBeInTheDocument();
+    expect(screen.getByText('3 of 5 milestones complete')).toBeInTheDocument();
+  });
+
+  it('shows no status note or reopened milestone for claims that never reopened', () => {
+    renderTimeline();
+    expect(screen.queryByTestId('status-message')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('milestone-reopened')).not.toBeInTheDocument();
+  });
+
+  it('renders the current decision outcome so a second decision is visible', () => {
+    const { unmount } = renderTimeline({ decisionOutcome: 'approved' });
+    expect(screen.getByTestId('decision-outcome')).toHaveTextContent('approved');
+    unmount();
+
+    renderTimeline({ decisionOutcome: 'rejected' });
+    expect(screen.getByTestId('decision-outcome')).toHaveTextContent('rejected');
+  });
+
+  it('omits the decision-outcome row when no decision is on record', () => {
+    renderTimeline({ decisionOutcome: null });
+    expect(screen.queryByTestId('decision-outcome')).not.toBeInTheDocument();
+  });
 });
 
 // ============ F7: settlement card on the timeline ============

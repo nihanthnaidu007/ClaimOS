@@ -59,6 +59,8 @@ const STATUS_PRESENTATION = {
   approved: 'bg-[#10b981]/15 text-[#10b981] border-[#10b981]/40',
   rejected: 'bg-[#ef4444]/15 text-[#ef4444] border-[#ef4444]/40',
   overridden: 'bg-[#7c3aed]/15 text-[#b79df5] border-[#7c3aed]/40',
+  // F14: reopened is a review state again — amber, like escalated.
+  reopened: 'bg-[#f59e0b]/15 text-[#f59e0b] border-[#f59e0b]/40',
 };
 
 export function statusClassName(status) {
@@ -98,8 +100,9 @@ export function formatDuration(ms) {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
-// Statuses a claim can be overridden from — mirrors backend REVIEWABLE_STATUSES.
-export const REVIEWABLE_STATUSES = ['escalated', 'pending', 'under_review'];
+// Statuses a human still has to act on — mirrors backend REVIEWABLE_STATUSES.
+// "reopened" (F14) is a review state: the claim needs a new decision.
+export const REVIEWABLE_STATUSES = ['escalated', 'pending', 'reopened', 'under_review'];
 
 export function isReviewable(status) {
   return REVIEWABLE_STATUSES.includes(status);

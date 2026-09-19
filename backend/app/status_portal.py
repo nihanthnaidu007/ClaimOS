@@ -48,6 +48,10 @@ _STATUS_LABELS = {
     "under_review": "In review",
     "rejected": "Rejected",
     "failed": "Processing error",
+    # F14 reopen flow: the claim is back under human review, and a re-decision
+    # (override) replaces the recorded outcome.
+    "reopened": "Being reviewed again",
+    "overridden": "Decision updated",
 }
 
 # Pipeline order for the customer's "what happens next" list. Mirrors
@@ -176,6 +180,7 @@ def milestone_timeline(events: list[dict]) -> tuple[list[dict], str | None]:
     completed: set[str] = set()
     submitted_at: str | None = None
     payout_at: str | None = None
+    reopened_at: str | None = None
 
     for event in sorted(events, key=lambda e: (e.get("seq", 0), e.get("created_at", ""))):
         event_type = event.get("event")
@@ -194,6 +199,10 @@ def milestone_timeline(events: list[dict]) -> tuple[list[dict], str | None]:
                 done_at.setdefault("decision_ready", created)
         elif event_type == "payout_recorded":
             payout_at = payout_at or created
+        elif event_type == "claim_reopened":
+            # A claim may reopen more than once; the latest reopen is the
+            # one that describes where the claim is now.
+            reopened_at = created
 
     current_agent = None
     for agent, _ in reversed(started):
@@ -211,6 +220,13 @@ def milestone_timeline(events: list[dict]) -> tuple[list[dict], str | None]:
         {"key": "payout_recorded", "label": "Payout recorded",
          "at": payout_at, "done": payout_at is not None},
     ]
+    if reopened_at:
+        # Conditional slot (F14): only claims that actually reopened show it —
+        # a pending "Reopened" slot would be noise on every other claim.
+        milestones.append(
+            {"key": "reopened", "label": "Claim reopened — under review again",
+             "at": reopened_at, "done": True}
+        )
     return milestones, current_agent
 
 
@@ -248,6 +264,11 @@ def public_document_requests(rows: list[dict]) -> list[dict]:
     ]
 
 
+_REOPEN_STATUS_MESSAGE = (
+    "Your claim is being reviewed again — we'll keep you updated as it progresses."
+)
+
+
 def public_status_payload(
     claim: dict,
     events: list[dict],
@@ -263,9 +284,12 @@ def public_status_payload(
     record), while contact details, the policy number, and settlement
     bookkeeping (method, reference, recorded_by) never appear. The payload is
     built field by field (deny by default): internal trace data has no path in.
+    A human re-decision (override) is the outcome of record — it replaces the
+    pipeline verdict.
     """
     milestones, current_agent = milestone_timeline(events)
     decision = (claim.get("agent_trace") or {}).get("decision") or {}
+    override = claim.get("override") or {}
     status = claim.get("status") or "pending"
     # F6 transparency: the deny-by-default projection is the only path from the
     # stored trace into this payload. Stage summaries carry pre-written copy;
@@ -279,9 +303,10 @@ def public_status_payload(
         "statusLabel": status_label(status),
         "currentStage": _STAGE_LABELS.get(current_agent),
         "incidentType": claim.get("incident_type", ""),
-        "decisionOutcome": decision.get("verdict"),
+        "decisionOutcome": override.get("decision") or decision.get("verdict"),
         "decisionReady": bool(decision),
         "pdfAvailable": bool(decision),
+        "statusMessage": _REOPEN_STATUS_MESSAGE if status == "reopened" else None,
         "milestones": milestones,
         # F2: pre-written stage copy + an ETA derived from existing SLA state.
         "nextSteps": next_steps(claim, current_agent),

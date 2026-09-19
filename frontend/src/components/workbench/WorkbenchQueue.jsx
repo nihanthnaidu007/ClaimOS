@@ -362,6 +362,7 @@ export default function WorkbenchQueue() {
           <option value="">All reviewable</option>
           <option value="escalated">Escalated</option>
           <option value="pending">Pending</option>
+          <option value="reopened">Reopened</option>
           <option value="under_review">Under review</option>
         </select>
       </label>

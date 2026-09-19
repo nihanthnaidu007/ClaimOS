@@ -1,4 +1,4 @@
-"""Claim support APIs: trace timeline and evidence pack.
+"""Claim support APIs: trace timeline, evidence pack, and audited reopen.
 
 Document upload/list live in server.py — one canonical route pair (a second,
 shadowed implementation here was unreachable dead code and has been removed).
@@ -11,13 +11,21 @@ merge-clean; server.py includes it with one line. FNOL drafts live in their
 own router (app.fnol_drafts).
 """
 
+import uuid
+from datetime import datetime, timezone
+
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import database
 from app.deps import UserRecord, require_adjuster
 from app.evidence_pack import generate_evidence_pack
-from app.events import get_claim_events
+from app.events import emit_event, get_claim_events
+from app.schemas import AuditEntry, ReopenRequest, ReopenResponse
+from app.workbench import DECIDED_STATUSES
+
+logger = structlog.get_logger("claimos.claims")
 
 router = APIRouter()
 
@@ -87,6 +95,87 @@ class EvidencePackResponse(BaseModel):
     claimId: str
     filename: str
     pdf: str
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+# ============ REOPEN ============
+
+
+@router.post("/claims/{claim_id}/reopen", response_model=ReopenResponse)
+async def reopen_claim(
+    claim_id: str,
+    body: ReopenRequest,
+    current_user: UserRecord = Depends(require_adjuster),
+):
+    """Reopen a decided claim for another round of human review (spec F14).
+
+    Valid only from a decided state — anything else is a 409 that names the
+    current status. Reopen is a REVIEW state, not an execution: the pipeline
+    is never re-enqueued here; re-adjudication is the adjuster's explicit
+    next action (override from the workbench). The reason is audited.
+    """
+    reason = body.reason.strip()
+    claim = await _require_claim(claim_id)
+
+    status = claim.get("status")
+    if status not in DECIDED_STATUSES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Claim status '{status}' cannot be reopened — only decided claims "
+                "(approved, rejected, overridden, settled, or failed) can reopen"
+            ),
+        )
+
+    at = _utc_now()
+    audit = AuditEntry(
+        id=f"aud_{uuid.uuid4().hex[:12]}",
+        claim_id=claim_id,
+        actor=current_user.id,
+        actor_email=current_user.email,
+        action="reopen",
+        before={"status": status},
+        after={"status": "reopened"},
+        reason=reason,
+        at=at,
+    )
+    await database.audit_log_col.insert_one(audit.model_dump().copy())
+
+    await database.claims_col.update_one(
+        {"id": claim_id},
+        {
+            "$set": {
+                "status": "reopened",
+                "reopen": {
+                    "actor": current_user.id,
+                    "actor_email": current_user.email,
+                    "action": "reopen",
+                    "reason": reason,
+                    "at": at,
+                    "auditId": audit.id,
+                },
+                "updated_at": at,
+            }
+        },
+    )
+
+    # Durable timeline event: the case view, the workbench stream, and the
+    # customer portal's milestone timeline all read this store.
+    await emit_event(
+        claim_id,
+        {
+            "event": "claim_reopened",
+            "reason": reason,
+            "actor": current_user.email,
+            "at": at,
+        },
+    )
+    logger.info("claim_reopened claim_id=%s actor=%s", claim_id, current_user.email)
+    return ReopenResponse(claimId=claim_id, status="reopened", auditEntry=audit)
+
 
 
 @router.get("/claims/{claim_id}/evidence-pack", response_model=EvidencePackResponse)

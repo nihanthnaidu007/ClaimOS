@@ -10,6 +10,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   FileText,
+  History,
   Loader2,
   OctagonAlert,
   RefreshCw,
@@ -30,6 +31,7 @@ import DocumentRequests from './DocumentRequests';
 import OverrideModal from './OverrideModal';
 import MessageThreadPanel from './MessageThreadPanel';
 import NotesPanel from './NotesPanel';
+import ReopenModal from './ReopenModal';
 
 const STAGE_ORDER = ['intake', 'policy', 'documents', 'fraud', 'eligibility', 'decision'];
 
@@ -279,6 +281,7 @@ export default function CaseView() {
   const [notFound, setNotFound] = useState(false);
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [caseTab, setCaseTab] = useState('case'); // 'case' | 'notes' (F11)
+  const [reopenOpen, setReopenOpen] = useState(false);
 
   const loadCase = useCallback(async () => {
     setLoadError(null);
@@ -351,7 +354,12 @@ export default function CaseView() {
   }
 
   const { summary, events, audit } = dossier;
-  const reviewable = ['escalated', 'pending', 'under_review'].includes(summary.status);
+  // F14: reopened is a review state (another decision is due); decided claims
+  // can go back under review via the audited reopen flow.
+  const reviewable = ['escalated', 'pending', 'reopened', 'under_review'].includes(summary.status);
+  const reopenable = ['auto_approved', 'approved', 'rejected', 'overridden', 'settled', 'failed'].includes(
+    summary.status
+  );
 
   return (
     <div className="p-6 max-w-6xl mx-auto" data-testid="case-view">
@@ -413,6 +421,16 @@ export default function CaseView() {
             className="inline-flex items-center gap-2 bg-[#7c3aed] hover:bg-[#6d28d9] text-white text-sm font-medium rounded-md px-4 py-2 transition-colors"
           >
             <CheckCircle2 className="w-4 h-4" aria-hidden /> Record decision
+          </button>
+        )}
+        {reopenable && (
+          <button
+            type="button"
+            onClick={() => setReopenOpen(true)}
+            data-testid="open-reopen"
+            className="inline-flex items-center gap-2 border border-[#f59e0b]/40 bg-[#f59e0b]/10 hover:bg-[#f59e0b]/20 text-[#f59e0b] text-sm font-medium rounded-md px-4 py-2 transition-colors"
+          >
+            <History className="w-4 h-4" aria-hidden /> Reopen claim
           </button>
         )}
       </div>
@@ -521,6 +539,14 @@ export default function CaseView() {
             </p>
           </div>
         )}
+        {summary.reopen && (
+          <div className="mt-3 bg-[#f59e0b]/10 border border-[#f59e0b]/40 rounded-lg p-4" data-testid="reopen-record">
+            <p className="text-sm text-[#f59e0b]">
+              Reopened by <span className="font-medium">{summary.reopen.actor_email || summary.reopen.actor}</span> on{' '}
+              {formatDateTime(summary.reopen.at)} — reason: “{summary.reopen.reason}”.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Trace timeline */}
@@ -589,6 +615,12 @@ export default function CaseView() {
         open={overrideOpen}
         onClose={() => setOverrideOpen(false)}
         onOverridden={() => loadCase()}
+      />
+      <ReopenModal
+        claimId={summary.claimId}
+        open={reopenOpen}
+        onClose={() => setReopenOpen(false)}
+        onReopened={() => loadCase()}
       />
     </div>
   );

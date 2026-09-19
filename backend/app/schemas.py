@@ -417,6 +417,7 @@ class CaseSummaryResponse(BaseModel):
     escalationReason: str | None = None
     failureReason: str | None = None
     override: dict[str, Any] | None = None
+    reopen: dict[str, Any] | None = None
     source: str = "stored agent traces"
 
 
@@ -575,6 +576,30 @@ class ReassignResponse(BaseModel):
     auditEntry: AuditEntry
 
 
+# ---- Claim reopen (spec F14) ----
+
+
+class ReopenRequest(BaseModel):
+    """Adjuster reopen of a decided claim (spec F14). The reason records why
+    the claim is going back under review — a missing or blank one is rejected
+    with 422, mirroring the override rule."""
+
+    reason: str = Field(min_length=1, max_length=OVERRIDE_REASON_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required to reopen")
+        return value
+
+
+class ReopenResponse(BaseModel):
+    claimId: str
+    status: str
+    auditEntry: AuditEntry
+
+
 # ---- Public status portal (customer communications PR) ----
 
 _CLAIM_NUMBER_PATTERN = r"^CLM-[0-9]{8}-[0-9]{1,6}$|^CLM-HIST-[0-9]{1,6}$"
@@ -647,6 +672,9 @@ class StatusLookupResponse(BaseModel):
     # beats an empty string or a fabricated date.
     nextSteps: list[str] = []
     expectedResolution: Optional[str] = None
+    # Reopen flow (F14): customer-facing copy shown while the claim is under
+    # review again. None for every other status.
+    statusMessage: Optional[str] = None
     # F6 decision transparency — the deny-by-default projection's output:
     # pre-written stage summaries and, on decided claims only, the decision's
     # plain-language summary + customer-safe citations. Internal trace data

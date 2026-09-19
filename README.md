@@ -86,6 +86,10 @@ crash loses at most the single stage in flight.
   "What happens next" card, and an honest ETA ("within about 3 business
   days…" — never a fabricated date; the field is omitted when the SLA state
   can't back one).
+- **Audited reopen** — a decided claim can go back under review via a
+  reason-required, adjuster-only reopen action (no pipeline re-run); the
+  customer portal shows the review-again state, and an explicit second
+  decision replaces the first on the portal.
 - **Seeded demo data** — 10 policies and 15 historical claims are seeded
   automatically when the database is empty.
 - **Claim assignment** — new claims auto-assign round-robin across active

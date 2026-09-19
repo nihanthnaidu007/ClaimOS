@@ -20,6 +20,7 @@ import {
 let adjuster;
 let customer;
 let claimId = null;
+let claimAccessCode = null;
 
 test.describe.configure({ mode: 'serial' });
 
@@ -38,6 +39,7 @@ test.beforeAll(async ({ request }) => {
     accidentClaim({ incidentDate: '2026-09-13', policyNumber: POLICY_400_DEDUCTIBLE })
   );
   claimId = submitted.claimId;
+  claimAccessCode = submitted.accessCode;
 
   const adjToken = (await apiLogin(request, adjuster)).token;
   const claim = await waitForTerminal(request, adjToken, claimId);
@@ -107,4 +109,81 @@ test('reasoned override from the workbench records an audit entry', async ({ pag
   expect(entries.length, 'exactly one audit entry').toBe(1);
   expect(entries[0].action).toBe('override');
   expect(entries[0].after?.payoutAmount).toBe(2600);
+});
+
+// F14 reopen flow: a decided claim goes back under review through the audited
+// reopen action — no pipeline re-run, the portal learns it is being reviewed
+// again, and an explicit second decision replaces the first.
+test('reopening the decided claim returns it to review, then a second decision replaces the first', async ({
+  page,
+  request,
+}) => {
+  await uiLogin(page, adjuster);
+  // A decided claim is not in the default queue (it left REVIEWABLE_STATUSES
+  // when the override recorded the verdict) — reach the case view directly.
+  await page.goto(`/workbench/claims/${claimId}`);
+  await expect(page.getByTestId('case-view')).toBeVisible();
+
+  // Decided state: reopen is the offered action, not Record decision.
+  await expect(page.getByTestId('open-reopen')).toBeVisible();
+  await expect(page.getByTestId('open-override')).not.toBeVisible();
+
+  // Client mirror of the backend rule: no reopen without a reason.
+  await page.getByTestId('open-reopen').click();
+  await expect(page.getByTestId('reopen-modal')).toBeVisible();
+  await expect(page.getByTestId('reopen-submit')).toBeDisabled();
+  await page.fill(
+    '[data-testid="reopen-reason"]',
+    'The policyholder submitted a second repair estimate after the decision was recorded.'
+  );
+  await expect(page.getByTestId('reopen-submit')).toBeEnabled();
+  await page.getByTestId('reopen-submit').click();
+  await expect(page.getByTestId('reopen-modal')).not.toBeVisible({ timeout: 30_000 });
+
+  // Reopened is a review state again: the record shows, the override action
+  // returns, and no pipeline re-run happened (the queue row never left).
+  await expect(page.getByTestId('reopen-record')).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('open-override')).toBeVisible();
+  await expect(page.getByTestId('open-reopen')).not.toBeVisible();
+  await saveEvidence(page, 'tc-14-reopen-workbench');
+
+  // Persisted: status reopened with a second audit entry, still no run.
+  const { token } = await apiLogin(request, adjuster);
+  const claim = await request
+    .get(`/api/claims/${claimId}`, { headers: authHeaders(token) })
+    .then((r) => r.json());
+  expect(claim.status, 'reopen flips the status to reopened').toBe('reopened');
+  const audit = await request
+    .get(`/api/workbench/claims/${claimId}/audit`, { headers: authHeaders(token) })
+    .then((r) => r.json());
+  const entries = Array.isArray(audit) ? audit : audit.entries ?? [];
+  expect(entries.length, 'override + reopen audit entries').toBe(2);
+  expect(entries[0].action, 'newest entry is the reopen').toBe('reopen');
+
+  // The explicit second decision — nothing re-adjudicates on its own.
+  await page.getByTestId('open-override').click();
+  await expect(page.getByTestId('override-modal')).toBeVisible();
+  await page.check('input[name="override-decision"][value="rejected"]');
+  await page.fill(
+    '[data-testid="override-reason"]',
+    'Second review confirms the loss is not covered; the earlier approval is superseded.'
+  );
+  await page.getByTestId('override-submit').click();
+  await expect(page.getByTestId('override-modal')).not.toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('override-record')).toBeVisible({ timeout: 30_000 });
+
+  // Customer portal: the chip says the review happened, the second decision
+  // replaced the decision section, and the reopened milestone stays on the
+  // timeline — without exposing the adjuster's internal reason.
+  await page.goto('/status');
+  await expect(page.getByTestId('status-portal')).toBeVisible();
+  await page.fill('[data-testid="status-claim-input"]', claimId);
+  await page.fill('[data-testid="status-code-input"]', claimAccessCode);
+  await page.getByTestId('status-lookup-submit').click();
+  await expect(page.getByTestId('status-timeline')).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByTestId('status-badge')).toContainText('Decision updated');
+  await expect(page.getByTestId('decision-outcome')).toContainText('rejected');
+  await expect(page.getByTestId('milestone-reopened')).toBeVisible();
+  await expect(page.getByTestId('status-message')).toHaveCount(0);
+  await saveEvidence(page, 'tc-14-reopen-portal');
 });
