@@ -14,7 +14,6 @@ from datetime import date
 
 SEVERITY_HIGH = "high"
 SEVERITY_MEDIUM = "medium"
-SEVERITY_LOW = "low"
 
 # Claimed-to-limit ratio at or above this is flagged. 1.0 means "claiming
 # at or beyond the full coverage limit"; anything under is normal behavior

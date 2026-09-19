@@ -106,11 +106,3 @@ export function reducePipelineEvent(state, event) {
       return state;
   }
 }
-
-// Which cache prefixes a terminal event must refresh from the server.
-export function queriesToInvalidate(state) {
-  if (state.status === 'finalized' || state.status === 'failed' || state.status === 'halted') {
-    return ['claims'];
-  }
-  return [];
-}
