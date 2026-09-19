@@ -173,6 +173,10 @@ class TestBuildOpsAnalytics:
                  "breaches": 0, "breachRate": 0.0},
             ]
         }
+        # Workload (spec F10): the only open (reviewable-status) claim is
+        # CLM-B (escalated) and no adjusters were supplied, so the roster is
+        # empty and the open claim counts as unassigned.
+        assert result["workload"] == {"adjusters": [], "unassigned": 1}
 
     def test_identical_inputs_yield_identical_outputs(self, seeded):
         claims, runs = seeded
@@ -198,6 +202,8 @@ class TestBuildOpsAnalytics:
         assert result["cycleTime"] == {"p50Seconds": 0.0, "p95Seconds": 0.0, "decided": 0}
         assert result["stp"] == {"decided": 0, "autoApproved": 0, "escalated": 0, "rate": 0.0}
         assert result["fraud"] == {"totalClaims": 0, "flaggedClaims": 0, "rate": 0.0}
+        # Spec F10: the workload group zeroes with the rest of the book.
+        assert result["workload"] == {"adjusters": [], "unassigned": 0}
         assert result["decisions"] == []
         assert result["sla"]["bySeverity"] == [
             {"severity": "elevated", "slaHours": 24.0, "decided": 0,
@@ -217,6 +223,86 @@ class TestGrouping:
         grouped = group_runs_by_claim(runs)
         assert set(grouped) == {"C1", "C2"}
         assert len(grouped["C1"]) == 2
+
+# ============ workload per adjuster (spec F10) ============
+
+
+class TestBuildWorkload:
+    """Pure workload counting: Mongo supplies rows, Python counts."""
+
+    def test_counts_open_claims_per_adjuster_busiest_first(self):
+        from app.analytics import build_workload
+
+        claims = [
+            # Open statuses (REVIEWABLE_STATUSES): escalated, pending, under_review.
+            {"id": "C1", "status": "pending", "assignee_id": "u1"},
+            {"id": "C2", "status": "escalated", "assignee_id": "u1"},
+            {"id": "C3", "status": "under_review", "assignee_id": "u2"},
+            # Decided statuses never count as workload.
+            {"id": "C4", "status": "auto_approved", "assignee_id": "u2"},
+            {"id": "C5", "status": "rejected", "assignee_id": "u1"},
+        ]
+        adjusters = [{"id": "u1", "email": "a@x.com"}, {"id": "u2", "email": "b@x.com"}]
+        result = build_workload(claims, active_adjusters=adjusters)
+        assert result == {
+            "adjusters": [
+                {"assigneeId": "u1", "email": "a@x.com", "openClaims": 2},
+                {"assigneeId": "u2", "email": "b@x.com", "openClaims": 1},
+            ],
+            "unassigned": 0,
+        }
+
+    def test_unassigned_counts_open_claims_without_assignee(self):
+        from app.analytics import build_workload
+
+        claims = [
+            {"id": "C1", "status": "pending", "assignee_id": None},  # legacy row
+            {"id": "C2", "status": "escalated"},  # no field at all
+            {"id": "C3", "status": "auto_approved", "assignee_id": None},
+        ]
+        result = build_workload(claims, active_adjusters=[])
+        assert result == {"adjusters": [], "unassigned": 2}
+
+    def test_zero_open_adjusters_still_appear_sorted(self):
+        from app.analytics import build_workload
+
+        claims = [{"id": "C1", "status": "pending", "assignee_id": "u2"}]
+        adjusters = [{"id": "u1", "email": "a@x.com"}, {"id": "u2", "email": "b@x.com"}]
+        result = build_workload(claims, active_adjusters=adjusters)
+        assert [row["assigneeId"] for row in result["adjusters"]] == ["u2", "u1"]
+        assert result["adjusters"][1]["openClaims"] == 0
+
+    def test_ties_break_on_adjuster_id(self):
+        from app.analytics import build_workload
+
+        claims = [
+            {"id": "C1", "status": "pending", "assignee_id": "u2"},
+            {"id": "C2", "status": "pending", "assignee_id": "u1"},
+        ]
+        adjusters = [{"id": "u2", "email": "b@x.com"}, {"id": "u1", "email": "a@x.com"}]
+        result = build_workload(claims, active_adjusters=adjusters)
+        assert [row["assigneeId"] for row in result["adjusters"]] == ["u1", "u2"]
+
+    async def test_route_payload_includes_workload(self, patched_mongo, make_authenticated_user):
+        from fastapi.testclient import TestClient
+        import server as server_mod
+
+        await patched_mongo.users.insert_one(
+            {"id": "u1", "email": "a@x.com", "role": "adjuster", "active": True}
+        )
+        await patched_mongo.claims.insert_one(
+            {"id": "CLM-W", "status": "pending", "assignee_id": "u1",
+             "incident_type": "theft", "claimed_amount": 100.0, "fraud_check": {}}
+        )
+        with TestClient(server_mod.app) as client:
+            headers, _, _ = make_authenticated_user(client)
+            response = client.get("/api/analytics/ops", headers=headers)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["workload"]["unassigned"] >= 0
+        matching = [row for row in body["workload"]["adjusters"] if row["assigneeId"] == "u1"]
+        assert matching and matching[0]["openClaims"] >= 1
+
 
 
 # ============ API surface ============

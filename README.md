@@ -85,6 +85,11 @@ crash loses at most the single stage in flight.
   can't back one).
 - **Seeded demo data** — 10 policies and 15 historical claims are seeded
   automatically when the database is empty.
+- **Claim assignment** — new claims auto-assign round-robin across active
+  adjusters (least-recently-assigned first; `AUTO_ASSIGN=none` opts out),
+  adjusters can reassign from the workbench with a full audit trail, the queue
+  filters by Mine / Unassigned / All, and ops analytics shows workload per
+  adjuster.
 
 ## Environment variables
 
@@ -102,6 +107,7 @@ vars — the backend loads `backend/.env` on startup.
 | `STP_CONFIDENCE_THRESHOLD` | backend | no | `0.85` | Straight-through gate: Decision confidence at or above this auto-finalizes low-severity, clean-eligibility claims; anything else escalates |
 | `STP_LOW_SEVERITY_AMOUNT` | backend | no | `10000` | Claimed amount at or under this counts as low severity for the STP gate |
 | `STP_LOW_SEVERITY_TYPES` | backend | no | `theft,weather_damage,vandalism` | Comma-separated incident types eligible for low severity |
+| `AUTO_ASSIGN` | backend | no | `round_robin` | Claim auto-assignment at creation: `round_robin` picks the active adjuster with the oldest last-assignment stamp (stable order, id tiebreak); `none` leaves claims unassigned |
 | `WORKER_POLL_INTERVAL_S` | backend | no | `1` | Seconds between claim_runs queue polls when the queue is empty |
 | `VITE_API_BASE_URL` | frontend | no | `http://localhost:8001` | API base URL; `VITE_*` vars are exposed to client code at build time — set it for any non-local deployment |
 

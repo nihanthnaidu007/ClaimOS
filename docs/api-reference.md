@@ -132,7 +132,7 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 
 ## Ops analytics (adjuster)
 
-**`GET /api/analytics/ops`** → `200` `OpsAnalyticsResponse` — five metric groups computed from stored claim timelines:
+**`GET /api/analytics/ops`** → `200` `OpsAnalyticsResponse` — six metric groups computed from stored claim timelines:
 
 ```json
 {
@@ -140,7 +140,8 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
   "stp": {"decided": …, "autoApproved": …, "escalated": …, "rate": …},
   "fraud": {"totalClaims": …, "flaggedClaims": …, "rate": …},
   "decisions": [{"status": "approved", "count": …}, …],
-  "sla": {"bySeverity": [{"severity": "low", "slaHours": 48, "decided": …, "breaches": …, "breachRate": …}]}
+  "sla": {"bySeverity": [{"severity": "low", "slaHours": 48, "decided": …, "breaches": …, "breachRate": …}]},
+  "workload": {"adjusters": [{"assigneeId": …, "email": …, "openClaims": …}], "unassigned": …}
 }
 ```
 
@@ -156,6 +157,7 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 | `sort` | `age` | `age` \| `severity` \| `risk` \| `created_at` (alias of `age`) |
 | `direction` | `asc` | `asc` = most-urgent-first for every key |
 | `search` | *(none)* | case-insensitive: claim **number by prefix**, policy **number by substring**, customer **name by substring** — one hit on any field matches (spec F8); composes with the filters above, honors the same cap, and also applies to `/stream` |
+| `assignee` | *(all)* | `mine` = rows assigned to the caller (resolved from the bearer token), `unassigned` = no `assignee_id` yet, omit for all |
 
 **`GET /api/workbench/stream`** — SSE over the same filtered queue. The stream re-reads the durable store on an interval and emits a `queue_update` frame (`{"event": "queue_update", "rows": …, "generatedAt": …}`) only when the rendered digest changes, with `: keep-alive` comments between. Same query parameters as `/queue`.
 
@@ -168,6 +170,8 @@ Draft IDs are client-generated (the wizard's localStorage key doubles as the ser
 **`POST /api/workbench/claims/{claim_id}/override`** — the workbench's one write path. Request: `{decision ("approved" | "rejected"), reason (required, 1–2000 chars, not blank), payoutAmount (optional, 0–5,000,000)}`. → `200` `{"claimId", "status": "overridden", "auditEntry": AuditEntry}` — stamps the claim, appends an immutable audit_log entry (who, before/after, why), and emits `claim_overridden` on the claim's event stream. Errors: `404` unknown claim; `409` when the claim is already decided ("re-open it before overriding") or its status cannot be overridden; `422` when the reason is missing or blank.
 
 **`GET /api/workbench/claims/{claim_id}/audit`** → `200` `AuditEntry[]` — append-only history, newest first, capped at 200.
+
+**`POST /api/workbench/claims/{claim_id}/assignee`** — the audited manual-reassignment path (spec F10). Request: `{assigneeId, reason (required, not blank)}`. → `200` `{"claimId", "assigneeId", "auditEntry": AuditEntry}` — stamps the claim's `assignee_id`/`assigned_at`/`assigned_by` (the acting human, never the auto-picker), appends an audit_log entry, and emits `claim_reassigned` on the claim's event stream. Errors: `404` unknown claim or unknown target user; `409` when the target is inactive or not an adjuster; `422` when the reason is missing or blank; `401` unauthenticated.
 
 ## Status portal (public — credential-bearing POSTs)
 

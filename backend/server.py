@@ -17,6 +17,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.cors import CORSMiddleware
 
 from app.analytics import collect_ops_analytics
+from app.assignment import assignment_fields, choose_auto_assignee
 from app.auth_routes import router as auth_router
 from app.claims_routes import router as claims_router
 from app.config import settings
@@ -168,6 +169,10 @@ async def submit_claim(
     claim_id = await generate_claim_id()
     access_code = generate_access_code()
     now = datetime.now(timezone.utc).isoformat()
+    # Round-robin assignment (spec F10) resolves before the doc is written so
+    # the claim is born with its owner — queue chips and workload analytics
+    # never see a create-then-assign gap.
+    assignee_id = await choose_auto_assignee()
 
     # The claim record must exist the instant the API responds — for two
     # reasons: wizard attachments upload against it right away and SSE
@@ -196,6 +201,9 @@ async def submit_claim(
                 "created_at": now,
                 "access_code": access_code,
                 "access_code_hash": access_code_hash(access_code),
+                # Assignment block (spec F10): explicit Nones when unassigned so
+                # queue filters and analytics read one shape for every row.
+                **assignment_fields(assignee_id, datetime.now(timezone.utc)),
             }
         },
         upsert=True,

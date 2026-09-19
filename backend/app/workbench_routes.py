@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 import database
+from app.assignment import assignment_fields
 from app.config import settings
 from app.deps import UserRecord, require_adjuster
 from app.events import emit_event, get_claim_events
@@ -43,6 +44,8 @@ from app.schemas import (
     CaseSummaryResponse,
     OverrideRequest,
     OverrideResponse,
+    ReassignRequest,
+    ReassignResponse,
     SavedViewApplyResponse,
     SavedViewCreate,
     SavedViewOut,
@@ -88,6 +91,7 @@ class QueueParams:
         sort: str = "age",
         direction: str = "asc",
         search: str = "",
+        assignee: str = "",
     ):
         self.statuses = [s.strip() for s in status.split(",") if s.strip()] or list(
             QUEUE_DEFAULT_STATUSES
@@ -96,6 +100,12 @@ class QueueParams:
         self.min_age_hours = min_age_hours
         self.max_age_hours = max_age_hours
         self.search = search.strip()
+        if assignee not in ("", "mine", "unassigned"):
+            raise HTTPException(status_code=400, detail="assignee must be mine, unassigned, or empty")
+        self.assignee = assignee
+        # Set by the routes (never parsed from the query string): the acting
+        # adjuster that the "mine" chip resolves against.
+        self.current_user: UserRecord | None = None
         if sort not in _SORT_KEYS:
             raise HTTPException(status_code=400, detail=f"sort must be one of {sorted(_SORT_KEYS)}")
         if sort == "created_at":  # alias: age and created_at order the same way
@@ -119,6 +129,15 @@ def _apply_row_filters(rows: list[dict], params: QueueParams) -> list[dict]:
         filtered = [row for row in filtered if row["sla"]["hoursElapsed"] >= params.min_age_hours]
     if params.max_age_hours is not None:
         filtered = [row for row in filtered if row["sla"]["hoursElapsed"] <= params.max_age_hours]
+    # Assignment chips (spec F10): "mine" resolves against the acting adjuster
+    # server-side — a client-supplied user id is never trusted; "unassigned"
+    # matches an empty/absent assignee_id (legacy rows included).
+    if params.assignee == "mine":
+        if params.current_user is None:  # defensive: routes always set it
+            return []
+        filtered = [row for row in filtered if row.get("assignee_id") == params.current_user.id]
+    elif params.assignee == "unassigned":
+        filtered = [row for row in filtered if not row.get("assignee_id")]
     return filtered
 
 
@@ -157,13 +176,15 @@ async def load_queue_rows(params: QueueParams) -> list[dict]:
 
 def queue_digest(rows: list[dict]) -> str:
     """Stable digest of the fields a queue renders — the SSE stream only emits
-    a frame when this changes (aging state moves, statuses change, rows appear)."""
+    a frame when this changes (aging state moves, statuses change, rows appear,
+    a claim is reassigned)."""
     material = [
         [
             row["id"],
             row["status"],
             row["sla"]["state"],
             round(row["sla"]["hoursElapsed"], 1),
+            row.get("assignee_id") or "",  # spec F10: reassignment refetches
         ]
         for row in rows
     ]
@@ -171,7 +192,10 @@ def queue_digest(rows: list[dict]) -> str:
 
 
 @router.get("/queue", response_model=WorkbenchQueueResponse)
-async def get_queue(params: QueueParams = Depends()):
+async def get_queue(
+    params: QueueParams = Depends(), current_user: UserRecord = Depends(require_adjuster)
+):
+    params.current_user = current_user
     rows = await load_queue_rows(params)
     return {"rows": rows, "generatedAt": _now_iso()}
 
@@ -206,7 +230,10 @@ async def _queue_stream(params: QueueParams):
 
 
 @router.get("/stream")
-async def stream_queue(params: QueueParams = Depends()):
+async def stream_queue(
+    params: QueueParams = Depends(), current_user: UserRecord = Depends(require_adjuster)
+):
+    params.current_user = current_user
     return StreamingResponse(_queue_stream(params), media_type="text/event-stream",
                              headers=_SSE_HEADERS)
 
@@ -345,6 +372,82 @@ async def override_claim(
     return {
         "claimId": claim_id,
         "status": "overridden",
+        "auditEntry": audit_entry,
+    }
+
+
+# ---- Manual reassignment (spec F10) ----
+
+
+@router.post("/claims/{claim_id}/assignee", response_model=ReassignResponse)
+async def reassign_claim(
+    claim_id: str, request: ReassignRequest, adjuster: UserRecord = Depends(require_adjuster)
+):
+    """Audited manual assignment change (spec F10.2).
+
+    Mirror of the override write path: adjuster-gated, reason required (422
+    via the schema), unknown claim or target user → 404, and every change
+    lands in the same immutable audit trail. The customer portal path never
+    reads assignee fields, so this write cannot leak into it.
+    """
+    claim = await database.claims_col.find_one({"id": claim_id}, {"_id": 0})
+    if not claim:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    target = await database.users_col.find_one({"id": request.assigneeId}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="Assignee not found")
+    target_user = UserRecord(**target)
+    if target_user.role != "adjuster" or not target_user.active:
+        raise HTTPException(
+            status_code=409, detail="Assignee must be an active adjuster"
+        )
+
+    at = _now_iso()
+    before = {"assigneeId": claim.get("assignee_id"), "assignedBy": claim.get("assigned_by")}
+    audit_entry = await _append_audit_entry(
+        {
+            "claim_id": claim_id,
+            "actor": adjuster.id,
+            "actor_email": adjuster.email,
+            "action": "reassign",
+            "before": before,
+            "after": {"assigneeId": target_user.id, "assignedBy": adjuster.email},
+            "reason": request.reason.strip(),
+            "at": at,
+        }
+    )
+    await database.claims_col.update_one(
+        {"id": claim_id},
+        {
+            "$set": {
+                # assignment_fields stamps assigned_by with the human actor's
+                # email — this assignment was made by a person, not the picker.
+                **assignment_fields(target_user.id, datetime.now(timezone.utc)),
+                "assigned_by": adjuster.email,
+                "updated_at": at,
+            }
+        },
+    )
+    await emit_event(
+        claim_id,
+        {
+            "event": "claim_reassigned",
+            "assigneeId": target_user.id,
+            "actor": adjuster.email,
+            "reason": request.reason.strip(),
+            "at": at,
+        },
+    )
+    logger.info(
+        "claim_reassigned claim_id=%s actor=%s assignee=%s",
+        claim_id,
+        adjuster.email,
+        target_user.email,
+    )
+    return {
+        "claimId": claim_id,
+        "assigneeId": target_user.id,
+        "assignedAt": at,
         "auditEntry": audit_entry,
     }
 

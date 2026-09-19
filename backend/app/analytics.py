@@ -1,9 +1,10 @@
-"""Ops analytics: five server-side metric groups over the claim timeline.
+"""Ops analytics: server-side metric groups over the claim timeline.
 
 Spec Tier 3 "Ops analytics" (AC-9): cycle-time percentiles, STP auto-approval
 rate, fraud-flag rate, decision distribution, and SLA breaches by severity —
 computed server-side from the durable claim/run timeline and rendered in the
-ops dashboard.
+ops dashboard. Spec F10 adds a sixth group: workload per adjuster (open
+reviewable claims, busiest adjuster first, plus the unassigned bucket).
 
 Determinism rule (spec AC-4 applies to money AND metric math): Mongo supplies
 the rows; Python supplies the arithmetic. Percentile interpolation and rate
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from app.stp import assess_claim_severity
+from app.workbench import REVIEWABLE_STATUSES
 from pipeline import RUN_AUTO_APPROVED, RUN_ESCALATED
 
 # Runs that represent a decision (cycle-time denominator + STP gate outcome).
@@ -113,6 +115,35 @@ class SlaBucket:
         return self.breaches / self.decided if self.decided else 0.0
 
 
+def build_workload(claims: list[dict], active_adjusters: list[dict] | None = None) -> dict:
+    """Workload-per-adjuster group (spec F10). Pure: Mongo supplies the rows,
+    Python counts.
+
+    `active_adjusters` is the projection of active adjuster accounts
+    ({"id", "email"}); every one appears — zero-open adjusters included — so
+    the card shows the whole roster, busiest first. Counts are open
+    (reviewable-status) claims per assignee; `unassigned` counts open claims
+    with no assignee_id (legacy/seed rows included). Ties break on adjuster
+    id so identical data always renders in the same order.
+    """
+    open_claims = [claim for claim in claims if claim.get("status") in REVIEWABLE_STATUSES]
+    open_counts: Counter = Counter()
+    for claim in open_claims:
+        if claim.get("assignee_id"):
+            open_counts[claim["assignee_id"]] += 1
+    unassigned = sum(1 for claim in open_claims if not claim.get("assignee_id"))
+    adjusters = [
+        {
+            "assigneeId": str(adjuster.get("id") or ""),
+            "email": str(adjuster.get("email") or ""),
+            "openClaims": open_counts.get(adjuster.get("id"), 0),
+        }
+        for adjuster in sorted(active_adjusters or [], key=lambda row: str(row.get("id") or ""))
+    ]
+    adjusters.sort(key=lambda row: (-row["openClaims"], row["assigneeId"]))
+    return {"adjusters": adjusters, "unassigned": unassigned}
+
+
 def build_ops_analytics(
     claims: list[dict],
     runs: list[dict],
@@ -120,8 +151,10 @@ def build_ops_analytics(
     low_types: set[str],
     low_amount_threshold: float,
     sla_hours_by_severity: dict[str, float],
+    active_adjusters: list[dict] | None = None,
 ) -> dict:
-    """Assemble the five metric groups. Pure: exact, repeatable, unit-testable."""
+    """Assemble the metric groups (plus workload per adjuster, spec F10). Pure:
+    exact, repeatable, unit-testable."""
     # ---- Cycle time percentiles ----
     runs_by_claim = group_runs_by_claim(runs)
     cycles = [
@@ -218,6 +251,8 @@ def build_ops_analytics(
         "fraud": fraud,
         "decisions": decisions,
         "sla": sla,
+        # Spec F10: sixth group — workload per active adjuster.
+        "workload": build_workload(claims, active_adjusters=active_adjusters),
     }
 
 
@@ -231,6 +266,11 @@ async def collect_ops_analytics() -> dict:
 
     claims = await database.claims_col.find({}, {"_id": 0}).to_list(None)
     runs = await database.claim_runs_col.find({}, {"_id": 0}).to_list(None)
+    # Active adjusters feed the workload group (spec F10) — the projection of
+    # accounts eligible for assignment, not the full user records.
+    users = await database.users_col.find(
+        {"role": "adjuster", "active": {"$ne": False}}, {"_id": 0, "id": 1, "email": 1}
+    ).to_list(500)
     from app.config import settings
 
     return build_ops_analytics(
@@ -246,4 +286,5 @@ async def collect_ops_analytics() -> dict:
             LOW: float(settings.sla_low_hours),
             ELEVATED: float(settings.sla_elevated_hours),
         },
+        active_adjusters=users,
     )

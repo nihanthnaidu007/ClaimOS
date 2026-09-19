@@ -111,6 +111,14 @@ export const opsAnalytics = {
       { severity: 'low', slaHours: 48, decided: 11, breaches: 0, breachRate: 0 },
     ],
   },
+  // Workload per adjuster (spec F10): busiest first, unassigned bucket last.
+  workload: {
+    adjusters: [
+      { assigneeId: 'usr_adj_1', email: 'maya.adjuster@claimos.example', openClaims: 4 },
+      { assigneeId: 'usr_adj_2', email: 'omar.adjuster@claimos.example', openClaims: 3 },
+    ],
+    unassigned: 2,
+  },
 };
 
 export const handlers = [

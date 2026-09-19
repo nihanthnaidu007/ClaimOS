@@ -147,7 +147,7 @@ QUEUE_ROW_FIELDS = (
     "failure_reason",
     "fraud_flags",
     "flags",
-    "assignee_id",
+    "assignee_id",  # spec F10: backs the Mine/Unassigned/All chips
 )
 
 # Seeded or legacy claim docs may be missing fields the row renders; coerce
@@ -158,6 +158,8 @@ _STRING_FIELDS = frozenset(
 )
 _NUMBER_FIELDS = frozenset({"claimed_amount", "risk_score"})
 _LIST_FIELDS = frozenset({"fraud_flags", "flags"})
+# None is meaningful here (unassigned), so it must pass through un-coerced.
+_NULLABLE_FIELDS = frozenset({"assignee_id"})
 
 
 # ============ Saved views (spec F12) ============
@@ -166,10 +168,11 @@ _LIST_FIELDS = frozenset({"fraud_flags", "flags"})
 # surface. Unknown keys are rejected on save (strict write, lenient read) so a
 # stale client can never plant a filter the queue silently ignores.
 VIEW_FILTER_KEYS = frozenset(
-    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search"}
+    {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search",
+     "assignee"}
 )
 
-_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search"})
+_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search", "assignee"})
 _VIEW_NUMBER_FILTERS = frozenset({"min_age_hours", "max_age_hours"})
 
 
@@ -206,7 +209,7 @@ def queue_row(claim: dict, *, now: datetime | None = None) -> dict:
     row = {"id": ""}
     for field in QUEUE_ROW_FIELDS:
         value = claim.get(field)
-        if value is None:
+        if value is None and field not in _NULLABLE_FIELDS:
             value = 0.0 if field in _NUMBER_FIELDS else [] if field in _LIST_FIELDS else ""
         row[field] = value
     row["severity"] = severity

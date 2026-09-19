@@ -131,6 +131,11 @@ class ClaimRecord(BaseModel):
     # Public status portal credential (adjuster case view displays it; the
     # public lookup matches only its SHA-256 hash).
     access_code: str | None = None
+    # Current assignment (spec F10): who owns the claim on the workbench.
+    # Absent/None on legacy and seed rows = unassigned.
+    assignee_id: str | None = None
+    assigned_at: str | None = None
+    assigned_by: str | None = None  # "auto" (round-robin) or the actor's email
     # Set when the claim failed or was escalated by the pipeline worker.
     failure_reason: str | None = None
     escalation_reason: str | None = None
@@ -224,12 +229,29 @@ class SlaSeverityStats(BaseModel):
     breachRate: float
 
 
+class AdjusterWorkload(BaseModel):
+    """Open (reviewable) claim count for one active adjuster (spec F10)."""
+
+    assigneeId: str
+    email: str = ""
+    openClaims: int
+
+
+class WorkloadStats(BaseModel):
+    """Workload-per-adjuster group (spec F10). Busiest adjuster first;
+    `unassigned` counts open claims with no assignee."""
+
+    adjusters: list[AdjusterWorkload]
+    unassigned: int
+
+
 class OpsAnalyticsResponse(BaseModel):
     cycleTime: CycleTimeStats
     stp: StpStats
     fraud: FraudFlagStats
     decisions: list[DecisionCount]
     sla: dict[str, Any]
+    workload: WorkloadStats
 
 
 # ---- Document uploads (Tier 3) ----
@@ -266,6 +288,9 @@ class UserRecord(BaseModel):
     password_hash: str
     role: UserRole
     created_at: str = ""
+    # Spec F10: round-robin rotation covers active adjusters only. The default
+    # keeps every existing/registered account active; no deactivation UI yet.
+    active: bool = True
 
 
 class PublicUser(BaseModel):
@@ -334,6 +359,8 @@ class WorkbenchQueueRow(BaseModel):
     failure_reason: str | None = None
     # Queue badge: non-empty when the fraud cross-check flagged the claim.
     fraud_flags: list[FraudFlagOut] = []
+    # Current assignee (spec F10) — backs the Mine/Unassigned/All filter chips.
+    assignee_id: str | None = None
 
 
 class WorkbenchQueueResponse(BaseModel):
@@ -503,6 +530,31 @@ class BulkActionResponse(BaseModel):
     results: list[BulkActionResultItem]
     updated: int
     failed: int
+
+
+# ---- Claim assignment (spec F10) ----
+
+
+class ReassignRequest(BaseModel):
+    """Manual assignment change. Like an override, the reason is what makes the
+    reassignment legitimate — a missing or blank one is rejected with 422."""
+
+    assigneeId: str = Field(min_length=1, max_length=64)
+    reason: str = Field(min_length=1, max_length=OVERRIDE_REASON_MAX)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("A reason is required to reassign")
+        return value
+
+
+class ReassignResponse(BaseModel):
+    claimId: str
+    assigneeId: str
+    assignedAt: str
+    auditEntry: AuditEntry
 
 
 # ---- Public status portal (customer communications PR) ----

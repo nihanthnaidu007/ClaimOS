@@ -40,7 +40,7 @@ const SORT_OPTIONS = [
   { value: 'risk', label: 'Risk (highest first)' },
 ];
 
-const INITIAL_FILTERS = { status: '', severity: '', minAgeHours: '', maxAgeHours: '', sort: 'age', search: '' };
+const INITIAL_FILTERS = { status: '', severity: '', assignee: 'all', minAgeHours: '', maxAgeHours: '', sort: 'age', search: '' };
 
 // Search goes out once typing pauses (spec F8 debounced search box).
 const SEARCH_DEBOUNCE_MS = 300;
@@ -117,6 +117,9 @@ export default function WorkbenchQueue() {
     () => ({
       status: filters.status || undefined,
       severity: filters.severity || undefined,
+      // 'all' is the UI default and sends no param, so the unfiltered view
+      // stays shareable/bookmarkable (spec F10).
+      assignee: filters.assignee === 'all' ? undefined : filters.assignee,
       min_age_hours: filters.minAgeHours || undefined,
       max_age_hours: filters.maxAgeHours || undefined,
       sort: filters.sort,
@@ -357,6 +360,35 @@ export default function WorkbenchQueue() {
           <option value="under_review">Under review</option>
         </select>
       </label>
+      {/* Assignment chips (spec F10) — the server resolves "mine" from the
+          bearer token; the chip only chooses the bucket. */}
+      <div
+        className="flex items-center gap-1 border border-[#1a1f2e] rounded-md p-0.5"
+        role="group"
+        aria-label="Assignment filter"
+        data-testid="filter-assignee"
+      >
+        {[
+          ['mine', 'Mine'],
+          ['unassigned', 'Unassigned'],
+          ['all', 'All'],
+        ].map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setFilter('assignee', value)}
+            aria-pressed={filters.assignee === value}
+            data-testid={`assignee-chip-${value}`}
+            className={`px-2 py-1 text-xs rounded font-mono transition-colors ${
+              filters.assignee === value
+                ? 'bg-[#3b82f6] text-[#0d1119]'
+                : 'text-[#8b96ab] hover:text-[#e2e8f0]'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <label className="text-xs uppercase tracking-wider text-[#8b96ab] font-mono">
         Severity
         <select
