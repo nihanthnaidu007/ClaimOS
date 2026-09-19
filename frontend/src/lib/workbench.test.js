@@ -101,7 +101,17 @@ describe('saved-view filter mapping (F12)', () => {
       sort: 'risk',
       search: '',
       assignee: 'all',
+      escalated: '',
     });
     expect(filtersToViewPreset(filters)).toEqual(preset);
+  });
+
+  it('round-trips an escalated saved view (spec F9) and defaults it off otherwise', () => {
+    const preset = { sort: 'age', escalated: 'yes' };
+    const filters = viewPresetToFilters(preset);
+    expect(filters.escalated).toBe('yes');
+    expect(filtersToViewPreset(filters)).toEqual(preset);
+    // A preset saved before F9 omits the key — restore escalates nothing.
+    expect(viewPresetToFilters({ severity: '', sort: 'age' }).escalated).toBe('');
   });
 });

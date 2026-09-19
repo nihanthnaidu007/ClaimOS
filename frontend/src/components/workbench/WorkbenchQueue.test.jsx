@@ -316,6 +316,59 @@ describe('WorkbenchQueue', () => {
   });
 });
 
+// ---- SLA escalation badge + filter (spec F9) ----
+describe('WorkbenchQueue escalation', () => {
+  it('renders the escalation badge only on rows with the escalated_at record', async () => {
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+
+    // Fixture: CLM-1001 carries escalated_at, CLM-1002 does not.
+    expect(screen.getByTestId('queue-escalation-badge-CLM-1001')).toBeInTheDocument();
+    expect(screen.getByTestId('queue-escalation-badge-CLM-1001').textContent).toMatch(/escalated/i);
+    expect(screen.queryByTestId('queue-escalation-badge-CLM-1002')).not.toBeInTheDocument();
+  });
+
+  it('sends escalated=yes when the Escalated chip is on and omits it otherwise', async () => {
+    const capturedUrls = [];
+    server.use(
+      http.get(`${API_BASE}/workbench/queue`, ({ request }) => {
+        capturedUrls.push(request.url);
+        return HttpResponse.json({
+          rows: workbenchQueueRows,
+          generatedAt: '2026-09-17T10:00:00+00:00',
+        });
+      })
+    );
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+    expect(new URL(capturedUrls[0]).searchParams.has('escalated')).toBe(false);
+
+    fireEvent.click(screen.getByTestId('filter-escalated'));
+    await waitFor(() => {
+      const url = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(url.searchParams.get('escalated')).toBe('yes');
+    });
+    expect(screen.getByTestId('filter-escalated')).toHaveAttribute('aria-pressed', 'true');
+
+    // Toggling off returns to the unfiltered default.
+    fireEvent.click(screen.getByTestId('filter-escalated'));
+    await waitFor(() => {
+      const url = new URL(capturedUrls[capturedUrls.length - 1]);
+      expect(url.searchParams.has('escalated')).toBe(false);
+    });
+  });
+
+  it('keeps the escalation chip active in the saved-view round-trip', async () => {
+    renderQueue();
+    await screen.findByTestId('workbench-queue');
+
+    fireEvent.click(screen.getByTestId('filter-escalated'));
+    await waitFor(() => {
+      expect(screen.getByTestId('filter-escalated')).toHaveAttribute('aria-pressed', 'true');
+    });
+  });
+});
+
 // ---- F12: bulk actions ----
 describe('WorkbenchQueue bulk actions', () => {
   it('hides the bulk bar until a row is selected and enables select-all', async () => {

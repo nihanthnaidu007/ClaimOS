@@ -107,6 +107,7 @@ vars — the backend loads `backend/.env` on startup.
 | `STP_CONFIDENCE_THRESHOLD` | backend | no | `0.85` | Straight-through gate: Decision confidence at or above this auto-finalizes low-severity, clean-eligibility claims; anything else escalates |
 | `STP_LOW_SEVERITY_AMOUNT` | backend | no | `10000` | Claimed amount at or under this counts as low severity for the STP gate |
 | `STP_LOW_SEVERITY_TYPES` | backend | no | `theft,weather_damage,vandalism` | Comma-separated incident types eligible for low severity |
+| `SLA_ESCALATION_FACTOR` | backend | no | `1.0` | Escalation threshold as a multiplier on the severity's SLA window (spec F9): the worker sets a claim's set-once `escalated_at` when age crosses factor × target hours; `1.0` escalates at-breach |
 | `AUTO_ASSIGN` | backend | no | `round_robin` | Claim auto-assignment at creation: `round_robin` picks the active adjuster with the oldest last-assignment stamp (stable order, id tiebreak); `none` leaves claims unassigned |
 | `WORKER_POLL_INTERVAL_S` | backend | no | `1` | Seconds between claim_runs queue polls when the queue is empty |
 | `VITE_API_BASE_URL` | frontend | no | `http://localhost:8001` | API base URL; `VITE_*` vars are exposed to client code at build time — set it for any non-local deployment |

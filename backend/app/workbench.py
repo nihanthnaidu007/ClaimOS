@@ -148,18 +148,20 @@ QUEUE_ROW_FIELDS = (
     "fraud_flags",
     "flags",
     "assignee_id",  # spec F10: backs the Mine/Unassigned/All chips
+    "escalated_at",  # spec F9: set-once SLA escalation record
 )
 
 # Seeded or legacy claim docs may be missing fields the row renders; coerce
 # instead of leaking None into the response model.
 _STRING_FIELDS = frozenset(
     {"id", "policy_number", "holder_name", "incident_type", "status", "created_at",
-     "assignee_id"}
+     "assignee_id", "escalated_at"}
 )
 _NUMBER_FIELDS = frozenset({"claimed_amount", "risk_score"})
 _LIST_FIELDS = frozenset({"fraud_flags", "flags"})
-# None is meaningful here (unassigned), so it must pass through un-coerced.
-_NULLABLE_FIELDS = frozenset({"assignee_id"})
+# None is meaningful here (unassigned / never escalated), so it must pass
+# through un-coerced.
+_NULLABLE_FIELDS = frozenset({"assignee_id", "escalated_at"})
 
 
 # ============ Saved views (spec F12) ============
@@ -169,10 +171,11 @@ _NULLABLE_FIELDS = frozenset({"assignee_id"})
 # stale client can never plant a filter the queue silently ignores.
 VIEW_FILTER_KEYS = frozenset(
     {"status", "severity", "min_age_hours", "max_age_hours", "sort", "direction", "search",
-     "assignee"}
+     "assignee", "escalated"}
 )
 
-_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search", "assignee"})
+_VIEW_STRING_FILTERS = frozenset({"status", "severity", "sort", "direction", "search", "assignee",
+                                  "escalated"})
 _VIEW_NUMBER_FILTERS = frozenset({"min_age_hours", "max_age_hours"})
 
 
@@ -326,6 +329,7 @@ def build_case_summary(claim: dict) -> dict:
         "intakeValid": intake.get("valid"),
         "stages": stages,
         "sla": sla_state(claim.get("created_at"), severity),
+        "escalatedAt": claim.get("escalated_at") or None,  # spec F9 set-once record
         "escalationReason": claim.get("escalation_reason") or None,
         "failureReason": claim.get("failure_reason") or None,
         "override": claim.get("override") or None,
