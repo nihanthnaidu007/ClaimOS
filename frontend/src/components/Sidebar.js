@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FilePlus, Search, History, Hexagon, Menu, X, ChevronRight, ShieldCheck } from 'lucide-react';
 import { useAuth } from '@/lib/auth';
 import NotificationBell from '@/components/NotificationBell';
+import { AGENT_ORDER } from '../features/claims/constants';
 
 const NAV_ITEMS = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
@@ -11,13 +12,10 @@ const NAV_ITEMS = [
   { path: '/history', label: 'Claim History', icon: History },
 ];
 
-const AGENT_STATUS = [
-  { label: 'INTAKE', color: 'bg-[#10b981]' },
-  { label: 'POLICY', color: 'bg-[#10b981]' },
-  { label: 'DOCUMENT', color: 'bg-[#10b981]' },
-  { label: 'ELIGIBILITY', color: 'bg-[#10b981]' },
-  { label: 'DECISION', color: 'bg-[#10b981]' },
-];
+const AGENT_STATUS = AGENT_ORDER.map((agent) => ({
+  label: agent.replace(/_AGENT$/, ''),
+  color: 'bg-[#10b981]',
+}));
 
 export default function Sidebar({ recentClaims = [] }) {
   const location = useLocation();
@@ -121,7 +119,7 @@ export default function Sidebar({ recentClaims = [] }) {
       <div className="px-4 py-3 border-t border-[#1a1f2e]">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] text-[#4a5568] font-mono">
-            ClaimOS v2.0 · 5 Agents Active
+            ClaimOS v2.0 · 6 Agents Active
           </span>
           <NotificationBell />
         </div>

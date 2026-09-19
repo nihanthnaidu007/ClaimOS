@@ -82,7 +82,10 @@ async def register(payload: RegisterRequest):
         # Constant-time comparison: invite codes are bearer credentials.
         raise HTTPException(status_code=403, detail="Invalid invite code")
     try:
-        return await auth_store.create_user(payload.email, payload.password, payload.role)
+        # Server-side role assignment: public registration is customer-only.
+        # Adjuster accounts are provisioned server-side (seeded demo
+        # credentials) — the client cannot self-select a role.
+        return await auth_store.create_user(payload.email, payload.password, "customer")
     except EmailAlreadyRegistered:
         raise HTTPException(status_code=409, detail="Email already registered") from None
 

@@ -57,21 +57,51 @@ VALID_CLAIM = {
 # ============ Registration (invite-only) ============
 
 
-def test_register_with_valid_invite_creates_user(client):
+def test_register_with_valid_invite_creates_customer(client):
     response = client.post(
         "/api/auth/register",
         json={
-            "email": "new.adjuster@test.example",
+            "email": "new.customer@test.example",
+            "password": TEST_PASSWORD,
+            "inviteCode": TEST_INVITE_CODE,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["email"] == "new.customer@test.example"
+    # Server-side role assignment: registration never grants roles.
+    assert body["role"] == "customer"
+    assert "password_hash" not in body  # hash never crosses the wire
+
+
+def test_register_cannot_self_select_adjuster_role(client, patched_mongo):
+    """Regression: the registration payload's role must be ignored — a caller
+    supplied role could otherwise mint an adjuster account with nothing but a
+    valid invite code (self-service privilege escalation)."""
+    response = client.post(
+        "/api/auth/register",
+        json={
+            "email": "escalating@test.example",
             "password": TEST_PASSWORD,
             "role": "adjuster",
             "inviteCode": TEST_INVITE_CODE,
         },
     )
     assert response.status_code == 201
-    body = response.json()
-    assert body["email"] == "new.adjuster@test.example"
-    assert body["role"] == "adjuster"
-    assert "password_hash" not in body  # hash never crosses the wire
+    assert response.json()["role"] == "customer"
+
+    # Login works (customer account), and the token is rejected by
+    # adjuster-only routes.
+    login = client.post(
+        "/api/auth/login",
+        json={"email": "escalating@test.example", "password": TEST_PASSWORD},
+    )
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['accessToken']}"}
+    assert client.get("/api/policies", headers=headers).status_code == 403
+
+    stored = _run(patched_mongo.users.find_one({"email": "escalating@test.example"}))
+    assert stored["role"] == "customer"
 
 
 def test_register_with_wrong_invite_code_rejected(client):

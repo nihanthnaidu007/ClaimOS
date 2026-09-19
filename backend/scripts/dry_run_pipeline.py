@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Dry-run the whole five-agent pipeline against a mocked Anthropic client.
+"""Dry-run the whole six-agent pipeline against a mocked Anthropic client.
 
 Verification harness for the prompt-tuning brief: with a mocked client (no API
-key) and mongomock (no MongoDB), the pipeline emits all five validated stage
-outputs — typed schemas in app/llm/schemas.py — and the Decision stage carries
-citations[]. Exit code 0 = all five outputs valid; 1 = failure.
+key) and mongomock (no MongoDB), the pipeline emits every stage output — the
+five LLM stages revalidate against typed schemas in app/llm/schemas.py and the
+deterministic fraud stage's shape is asserted — and the Decision stage carries
+citations[]. Exit code 0 = every output valid; 1 = failure.
 
 Usage: cd backend && python3 scripts/dry_run_pipeline.py
 """
@@ -214,6 +215,8 @@ async def main_async() -> int:
     assert state["policy"]["adjustedPayout"] == 4000.0  # computed in code
     assert state["documents"]["consistencyScore"] == 90  # derived in code
     assert state["eligibility"]["riskScore"] == 5  # scored in code
+    assert set(state["fraud"]) == {"fingerprint", "flags", "similarity"}
+    assert state["fraud"]["similarity"] is None  # no duplicate candidates here
     decision = state["decision"]
     assert decision["verdict"] == "approved"
     assert decision["citations"], "decision output must carry citations[]"
@@ -223,9 +226,9 @@ async def main_async() -> int:
     )
 
     print(json.dumps({key: state[key] for key in
-                      ("intake", "policy", "documents", "eligibility", "decision")}, indent=2))
+                      ("intake", "policy", "documents", "fraud", "eligibility", "decision")}, indent=2))
     print(
-        "\nOK: pipeline dry-run emitted five validated outputs; "
+        "\nOK: pipeline dry-run emitted all six stage outputs; "
         f"decision citations={len(decision['citations'])}; "
         f"LLM calls={len(messages.parse_calls)}"
     )

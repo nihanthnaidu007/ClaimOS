@@ -1,6 +1,6 @@
 # ClaimOS user guide
 
-ClaimOS takes an insurance claim from submission to decision and shows you every step of the machine's reasoning. A claim enters through a form, runs through five software agents in sequence, and comes out with a verdict, a payout figure, a written letter to the customer, and a complete trace you can read line by line. If the system is confident and the risk is low, it finalizes the claim automatically. If anything looks risky, it hands the claim to a human with its reasons attached. You are never guessing why the machine decided something — the reasons are the product.
+ClaimOS takes an insurance claim from submission to decision and shows you every step of the machine's reasoning. A claim enters through a form, runs through six software agents in sequence, and comes out with a verdict, a payout figure, a written letter to the customer, and a complete trace you can read line by line. If the system is confident and the risk is low, it finalizes the claim automatically. If anything looks risky, it hands the claim to a human with its reasons attached. You are never guessing why the machine decided something — the reasons are the product.
 
 This guide has two parts: one for adjusters working claims in the console, and one for customers checking on a claim.
 
@@ -10,19 +10,18 @@ This guide has two parts: one for adjusters working claims in the console, and o
 
 This part is written for a first-time insurance operations hire. No prior claims experience is assumed; where the industry has a jargon word, we use the plain term the product uses.
 
-### The five pipeline stages
+### The six pipeline stages
 
 Every claim walks the same path. The stage names appear in the console, so they are worth memorizing on day one:
 
 1. **Intake & Validation** — checks the form is complete and plausible: a real date, a positive amount, a description long enough to be meaningful.
 2. **Policy Verification** — looks the policy number up in the database and checks coverage: is the policy active, is this type of incident covered, how much of the claimed amount survives the coverage limit and the deductible.
 3. **Document Analysis** — reads the pasted or attached evidence, extracts the facts, and judges how consistent the story is (consistent, partially consistent, or contradicting, plus any red flags).
-4. **Eligibility & Risk** — turns everything so far into a risk score from 0–100 and a recommendation. The score is computed by fixed arithmetic in code, not by the AI: the same inputs always produce the same number.
-5. **Decision & Communication** — issues the verdict, sets the payout amount, and writes the customer letter.
+4. **Fraud Cross-Check** — a deterministic rule set plus duplicate-incident similarity: every claim carries an incident fingerprint, and a claim that closely resembles an earlier one is flagged with a severity and an explanation, adding points to the risk score and a badge on the workbench.
+5. **Eligibility & Risk** — turns everything so far into a risk score from 0–100 and a recommendation. The score is computed by fixed arithmetic in code, not by the AI: the same inputs always produce the same number.
+6. **Decision & Communication** — issues the verdict, sets the payout amount, and writes the customer letter.
 
 Two stages can stop the pipeline early. If Intake finds the submission invalid, the pipeline halts and the claim is recorded with the reason — nothing vanishes. If Policy can't find the policy number, or the policy is expired or suspended, the pipeline halts there with the reason on the record. A halted claim is data, not a lost claim.
-
-A deterministic fraud cross-check runs alongside the pipeline: every claim carries an incident fingerprint, and a claim that closely resembles an earlier one is flagged with a severity and an explanation, adding points to the risk score and a badge on the workbench.
 
 ### How the risk score works (and when you'll see it)
 
@@ -30,7 +29,7 @@ The Eligibility stage adds fixed points for each risk factor on top of a small b
 
 The routing follows the score: **0–29 recommends auto-approve, 30–69 recommends escalation to a human, 70–100 recommends auto-reject.** Two conditions force auto-reject regardless of the number: the incident type is not covered, or the policy was expired or suspended on the incident date.
 
-When the system finalizes a claim automatically, it is because severity was low, its confidence was high (0.85 or above on the default gate), and eligibility came back clean. When any of those legs fails, the claim escalates to the review queue with the reason recorded. The full five-agent trace is attached either way — a claim a machine finalized shows the same reasoning you would have reviewed yourself.
+When the system finalizes a claim automatically, it is because severity was low, its confidence was high (0.85 or above on the default gate), and eligibility came back clean. When any of those legs fails, the claim escalates to the review queue with the reason recorded. The full six-agent trace is attached either way — a claim a machine finalized shows the same reasoning you would have reviewed yourself.
 
 ### The screens
 
@@ -40,7 +39,7 @@ When the system finalizes a claim automatically, it is because severity was low,
 
 The wizard saves a draft as you go, quietly. Leave halfway and come back, and it offers your draft back with the time it was saved; you decide whether to continue or discard it. Drafts survive reloads and different sessions on the same account, and discarding one is permanent — the server copy goes with it.
 
-**Claim view and pipeline traces.** Opening a claim shows the five stages and their state. While a claim is running, the stage rows stream live: each stage flips from running to complete as its `agent_start` and `agent_complete` events arrive, with the agent's reasoning text, the tools it called, and its duration in milliseconds. A connection chip in the header tells you the stream's health — Live, Reconnecting, or Offline with the last update time. If the connection drops mid-run and comes back, the board replays what it missed from the stored event log and lands on the true current state; you never need to refresh to catch up. Completed stages stay rendered even if a later stage errors — a red stage never erases the green ones above it.
+**Claim view and pipeline traces.** Opening a claim shows the six stages and their state. While a claim is running, the stage rows stream live: each stage flips from running to complete as its `agent_start` and `agent_complete` events arrive, with the agent's reasoning text, the tools it called, and its duration in milliseconds. A connection chip in the header tells you the stream's health — Live, Reconnecting, or Offline with the last update time. If the connection drops mid-run and comes back, the board replays what it missed from the stored event log and lands on the true current state; you never need to refresh to catch up. Completed stages stay rendered even if a later stage errors — a red stage never erases the green ones above it.
 
 The claim also shows its processing runs: each attempt, when it started and finished, and why it failed or escalated if it did. A claim whose worker was interrupted resumes from its last completed stage rather than starting over, so an attempt that took two tries shows both — and what the second try picked up.
 

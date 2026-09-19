@@ -4,6 +4,7 @@ import {
   authHeaders,
   registerUser,
   saveEvidence,
+  seededAdjuster,
   theftClaim,
   uiLogin,
 } from './utils';
@@ -17,8 +18,8 @@ let adjuster;
 let customer;
 
 test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
+  adjuster = seededAdjuster();
+  customer = await registerUser(request);
 });
 
 test('wizard blocks malformed incident input before any network submit', async ({

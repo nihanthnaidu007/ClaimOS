@@ -12,15 +12,27 @@ export function uniqueEmail() {
   return `e2e-${Date.now()}-${Math.floor(Math.random() * 1000)}@claimos.dev`;
 }
 
-export async function registerUser(request, { role = 'adjuster' } = {}) {
+// Registration is customer-only now: the server assigns the role and the
+// payload carries no role field to ignore.
+export async function registerUser(request) {
   const email = uniqueEmail();
   const password = 'e2e-Passw0rd!42';
   const res = await request.post('/api/auth/register', {
-    data: { email, password, role, inviteCode: E2E_INVITE },
+    data: { email, password, inviteCode: E2E_INVITE },
   });
   if (res.status() !== 201) {
     throw new Error(`register failed: ${res.status()} ${await res.text()}`);
   }
+  return { email, password };
+}
+
+// The seeded demo adjuster (DEMO_ADJUSTER_EMAIL/PASSWORD). Public registration
+// no longer grants roles, so adjuster sessions sign in as the account the API
+// seeds at startup — compose and the CI E2E job boot the stack with these
+// exact values; the fallbacks match their defaults (docker-compose.yml).
+export function seededAdjuster() {
+  const email = process.env.DEMO_ADJUSTER_EMAIL || 'adjuster-e2e@claimos.dev';
+  const password = process.env.DEMO_ADJUSTER_PASSWORD || 'e2e-Adjuster!42';
   return { email, password };
 }
 

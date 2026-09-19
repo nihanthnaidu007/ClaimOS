@@ -3,6 +3,7 @@ import {
   apiLogin,
   registerUser,
   saveEvidence,
+  seededAdjuster,
   submitClaim,
   theftClaim,
   waitForTerminal,
@@ -19,8 +20,8 @@ const UNIFORM_MISS =
 let claim = null;
 
 test.beforeAll(async ({ request }) => {
-  const adjuster = await registerUser(request, { role: 'adjuster' });
-  const customer = await registerUser(request, { role: 'customer' });
+  const adjuster = seededAdjuster();
+  const customer = await registerUser(request);
 
   const custToken = (await apiLogin(request, customer)).token;
   claim = await submitClaim(

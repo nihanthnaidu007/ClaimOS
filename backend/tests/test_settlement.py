@@ -88,9 +88,43 @@ class TestRecordSettlement:
             client.post(_settle_url(), json=_settle(), headers=headers)
 
         events = await patched_mongo.events.find({"claim_id": CLAIM_ID}).to_list(100)
-        assert [e["event"] for e in events if e["event"] == "settlement_recorded"] == [
-            "settlement_recorded"
+        # The event carries the customer-facing milestone name: the status
+        # portal's fourth milestone and the notification fan-out both key on
+        # `payout_recorded` — nothing consumes any other settlement event.
+        assert [e["event"] for e in events if e["event"] == "payout_recorded"] == [
+            "payout_recorded"
         ]
+
+    async def test_settlement_completes_payout_milestone_and_fans_out_notification(
+        self, patched_mongo, make_authenticated_user
+    ):
+        """Regression: recording a settlement used to emit `settlement_recorded`,
+        which no consumer read — the portal's fourth milestone never completed
+        and its notification never fired. The emitted event is the
+        consumer-expected `payout_recorded`, so the fan-out choke point in
+        emit_event records the notification for the claim's contact email."""
+        await patched_mongo.claims.insert_one(
+            _claim_doc(contact_email="dana.whitfield@example.com")
+        )
+        with TestClient(server.app) as client:
+            headers, _, _ = make_authenticated_user(client, role="adjuster")
+            response = client.post(_settle_url(), json=_settle(), headers=headers)
+        assert response.status_code == 201
+
+        # The milestone event landed on the durable log...
+        events = await patched_mongo.events.find({"claim_id": CLAIM_ID}).to_list(100)
+        assert [e["event"] for e in events if e["event"] == "payout_recorded"] == [
+            "payout_recorded"
+        ]
+
+        # ...and the fan-out recorded exactly one payout notification,
+        # addressed to the claim's contact email.
+        notifications = await patched_mongo.notifications.find(
+            {"claim_id": CLAIM_ID, "milestone": "payout_recorded"}
+        ).to_list(10)
+        assert len(notifications) == 1
+        assert notifications[0]["title"] == "Payout recorded"
+        assert notifications[0]["recipient_email"] == "dana.whitfield@example.com"
 
     async def test_reference_is_optional(self, patched_mongo, make_authenticated_user):
         await patched_mongo.claims.insert_one(_claim_doc())

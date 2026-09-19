@@ -1,4 +1,4 @@
-// Live pipeline board: five agent cards fed by the durable event stream.
+// Live pipeline board: six agent cards fed by the durable event stream.
 import { useState } from 'react';
 import { CheckCircle2, XCircle, AlertTriangle, Clock, Wrench, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
 import { AGENT_META, AGENT_ORDER, formatDollars } from './constants';

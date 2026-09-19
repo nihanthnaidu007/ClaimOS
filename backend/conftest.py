@@ -80,12 +80,34 @@ def auth_test_env(monkeypatch):
     limiter.enabled = False
 
 
+def _promote_role_in_store(db, email: str, role: str) -> None:
+    """Grant a role directly in the user store (server-side provisioning).
+
+    Public registration no longer grants roles — it always creates a customer.
+    Tests that need another role register through the public route and then
+    flip the stored role, the same shape as the seeded demo accounts. The
+    write runs on a worker thread: async tests already own the event loop,
+    and the mongomock collections are loop-agnostic (the suite also drives
+    them through per-call asyncio.run).
+    """
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    async def _promote():
+        await db.users.update_one({"email": email}, {"$set": {"role": role}})
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(asyncio.run, _promote()).result()
+
+
 @pytest.fixture
 def make_authenticated_user(patched_mongo):
     """Register + login a user; returns (auth_headers, csrf_token, email).
 
     Uses a fresh email per call so tests never collide on the unique index.
     The TestClient keeps the refresh/CSRF cookies in its jar automatically.
+    `role` is granted server-side (see _promote_role_in_store); only
+    customer accounts come straight from the public registration route.
     """
     from uuid import uuid4
 
@@ -96,11 +118,12 @@ def make_authenticated_user(patched_mongo):
             json={
                 "email": email,
                 "password": TEST_PASSWORD,
-                "role": role,
                 "inviteCode": TEST_INVITE_CODE,
             },
         )
         assert response.status_code == 201, response.text
+        if role != "customer":
+            _promote_role_in_store(patched_mongo, email, role)
         response = client.post(
             "/api/auth/login", json={"email": email, "password": TEST_PASSWORD}
         )

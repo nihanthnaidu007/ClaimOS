@@ -1,7 +1,7 @@
 # ClaimOS
 
 Glass-box AI claims adjudication. ClaimOS walks an insurance claim through a
-five-agent pipeline — **Intake → Policy → Documents → Eligibility → Decision** —
+six-agent pipeline — **Intake → Policy → Documents → Fraud → Eligibility → Decision** —
 and streams every step live, so a human can watch exactly how the machine
 reached its verdict. Every decision ships with a downloadable PDF letter and a
 complete per-agent reasoning trace.
@@ -16,7 +16,7 @@ complete per-agent reasoning trace.
    The API mints a claim ID and enqueues a durable `claim_runs` document; the
    HTTP response returns immediately.
 2. **A worker process claims the run** (`queued → running` via an atomic
-   `find_one_and_update`) and executes the five agents in sequence, each a
+   `find_one_and_update`) and executes the six agents in sequence, each a
    Claude-backed step with a strict JSON contract. Deterministic MongoDB tool
    calls (policy lookup, claim history) run *before* the LLM and hand it facts,
    not tool schemas. Every finished stage is checkpointed onto the run
@@ -60,7 +60,7 @@ frontend (Vite dev server, :5173)
    │  GET  /api/events/streams/{id} ◄─ SSE: tail of the events collection,
    │                                     Last-Event-ID replay on reconnect
    ▼
-worker (python worker.py) ── claims run atomically ──► five agents
+worker (python worker.py) ── claims run atomically ──► six agents
    └─ checkpoints + events + claim row ──► MongoDB (claim_runs, events, claims)
 ```
 

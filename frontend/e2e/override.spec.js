@@ -4,6 +4,7 @@ import {
   authHeaders,
   registerUser,
   saveEvidence,
+  seededAdjuster,
   submitClaim,
   accidentClaim,
   waitForTerminal,
@@ -23,8 +24,8 @@ let claimId = null;
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ request }) => {
-  adjuster = await registerUser(request, { role: 'adjuster' });
-  customer = await registerUser(request, { role: 'customer' });
+  adjuster = seededAdjuster();
+  customer = await registerUser(request);
 
   // $4,200 accident -> elevated severity -> the STP gate refuses
   // straight-through -> the run escalates -> the claim is reviewable.
