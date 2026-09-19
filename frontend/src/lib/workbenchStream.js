@@ -5,18 +5,13 @@
 // (`data: {...}` frames, `: comment` keep-alives). Auto-reconnects with
 // backoff while a consumer is mounted; reports connection state so the UI can
 // show a live/stale indicator instead of silently stale data.
-import { API_BASE, getAccessToken } from './api';
+import { getAccessToken } from './api';
+import { buildApiUrl } from './apiBase';
 
+// buildApiUrl is the shared URL authority — relative (same-origin) bases
+// resolve against the page origin here, which the old inline `new URL` lacked.
 function buildUrl(path, params) {
-  const url = new URL(`${API_BASE}${path}`);
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== null && value !== '') {
-        url.searchParams.set(key, value);
-      }
-    });
-  }
-  return url.toString();
+  return buildApiUrl(path, params);
 }
 
 function extractFramePayload(frame) {
