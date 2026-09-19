@@ -65,11 +65,11 @@ QA evidence: `docs/acceptance.md` maps AC-1..AC-13 to the tests and screenshots 
 
 ## Codebase map
 
-See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (FastAPI app + `/api` routers) + `backend/agents.py` (six `PIPELINE_STAGES`, typed stage IO) + `backend/pipeline.py` (claim_runs queue, checkpointed runner) + `backend/worker.py` (queue consumer) + `backend/database.py` (Motor, collections, seed) + `backend/app/` (config, auth, assignment, fraud/rating/stp, workbench, status portal, analytics, events, uploads, LLM adapter/fixture) + `frontend/src/` (Vite app: dashboard, FNOL wizard + pipeline board, workbench, status portal).
+See [codebase-map.md](codebase-map.md). One-line version: `backend/server.py` (FastAPI app + `/api` routers) + `backend/agents.py` (six `PIPELINE_STAGES`, typed stage IO) + `backend/pipeline.py` (claim_runs queue, checkpointed runner) + `backend/worker.py` (queue consumer) + `backend/database.py` (Motor, collections, seed) + `backend/app/` (config, auth, assignment, fraud/rating/stp, workbench, status portal, analytics, events, uploads, claim messaging, LLM adapter/fixture) + `frontend/src/` (Vite app: dashboard, FNOL wizard + pipeline board, workbench, status portal).
 
 ## Local verification
 
-- Backend tests: `pytest tests/ backend/tests/` — 340 passed in ~5s, no live MongoDB needed (mongomock-motor). Verified 2026-09-18 on the feature-wiring corrections branch with the sandbox venv `/home/user/venv-claimos` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution.
+- Backend tests: `pytest tests/ backend/tests/` — 515 passed, no live MongoDB needed (mongomock-motor). Verified 2026-09-19 on `feat/claim-messaging` (rebased on main) with the sandbox venv `/home/user/venv-claimos` (Python 3.13; containers/CI pin 3.12). Frontend tests need Node 22 (`PATH=/home/user/dl/node22/bin:$PATH`) — the system Node 20.20 breaks vitest's jsdom/undici resolution.
 - Backend lint: `ruff check backend tests` (flake8 is gone; ruff config in `backend/pyproject.toml`).
 - Frontend unit: `cd frontend && npm test`; frontend lint: `cd frontend && npx eslint .`
 - E2E: fixture-mode compose stack + `cd frontend && npx playwright test`

@@ -315,6 +315,8 @@ PORTAL_PAYLOAD_ALLOWLIST = frozenset({
     "milestones", "nextSteps", "expectedResolution",
     # F6 decision transparency — the deny-by-default projection's output.
     "stageSummaries", "decision",
+    # F5 messaging — lets the portal mount the customer thread surface.
+    "messagesEnabled",
 })
 
 STAGE_NAMES = tuple(stage["name"] for stage in PIPELINE_STAGES)

@@ -238,6 +238,7 @@ def public_status_payload(claim: dict, events: list[dict], *, now: datetime | No
         "nextSteps": next_steps(claim, current_agent),
         "stageSummaries": [s.model_dump() for s in projection.stage_summaries],
         "decision": projection.decision.model_dump() if projection.decision else None,
+        "messagesEnabled": True,
     }
     eta = expected_resolution(claim, now=now)
     if eta is not None:

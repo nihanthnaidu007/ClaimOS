@@ -4,6 +4,7 @@ import axios from 'axios';
 
 import StatusTimeline from '@/components/StatusTimeline';
 import NextStepsCard from '@/components/NextStepsCard';
+import PortalMessageThread from '@/components/PortalMessageThread';
 
 const API = `${import.meta.env.VITE_API_BASE_URL}/api`;
 
@@ -191,6 +192,13 @@ export default function StatusPortal() {
         )}
 
         {status && <StatusTimeline status={status} onDownloadLetter={downloadLetter} downloading={downloading} />}
+
+        {status?.messagesEnabled && credentials ? (
+          <PortalMessageThread
+            claimNumber={credentials.claimNumber}
+            credentials={credentials}
+          />
+        ) : null}
       </div>
     </div>
   );
