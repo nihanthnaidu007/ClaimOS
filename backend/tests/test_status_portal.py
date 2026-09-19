@@ -317,6 +317,8 @@ PORTAL_PAYLOAD_ALLOWLIST = frozenset({
     "stageSummaries", "decision",
     # F5 messaging — lets the portal mount the customer thread surface.
     "messagesEnabled",
+    # F7 settlement card — record fields only, and only once recorded.
+    "settlement",
 })
 
 STAGE_NAMES = tuple(stage["name"] for stage in PIPELINE_STAGES)
@@ -658,3 +660,131 @@ def test_lookup_projection_ignores_new_internal_trace_field(client, patched_mong
 
     body = _lookup(client, "CLM-20260917-042", code).json()
     assert "ENDPOINT-LEAK-42" not in str(body)
+
+
+# ============ F7: settlement card (record fields only, once recorded) ============
+
+
+def _settlement_record(**overrides):
+    """The settlement record exactly as POST /claims/{id}/settlement stores it."""
+    record = {
+        "amount": 1150.0,
+        "method": "bank_transfer",
+        "reference": "BNK-2026-000123",
+        "settled_at": _now(),
+        "recorded_by": "adjuster@claimos.dev",
+    }
+    record.update(overrides)
+    return record
+
+
+def _decided_claim(**overrides):
+    """An auto-approved claim dict, tuned per test."""
+    return _projection_claim(
+        status="auto_approved",
+        agent_trace={"decision": {"verdict": "approved"}},
+        **overrides,
+    )
+
+
+def test_settlement_card_absent_before_settlement():
+    """AC-7.1 absence branch: before settlement the payload carries no card
+    key at all, and milestone 4 stays pending with no timestamp."""
+    payload = public_status_payload(_decided_claim(), _events_through(len(STAGE_NAMES)))
+
+    assert "settlement" not in payload
+    milestones = {m["key"]: m for m in payload["milestones"]}
+    assert milestones["payout_recorded"]["done"] is False
+    assert milestones["payout_recorded"]["at"] is None
+
+
+def test_settlement_card_and_final_milestone_appear_after_settlement():
+    """AC-7.1 present branch: settlement recorded -> the payload carries the
+    card and milestone 4 completes from the payout_recorded event."""
+    settled_at = _now()
+    claim = _decided_claim(settlement=_settlement_record(settled_at=settled_at))
+    events = _events_through(len(STAGE_NAMES)) + [
+        {"event": "payout_recorded", "data": {"amount": 1150.0}, "seq": 99, "created_at": settled_at}
+    ]
+
+    payload = public_status_payload(claim, events)
+
+    assert payload["settlement"] == {"amount": 1150.0, "settledAt": settled_at}
+    milestones = {m["key"]: m for m in payload["milestones"]}
+    assert milestones["payout_recorded"]["done"] is True
+    assert milestones["payout_recorded"]["at"] == settled_at
+
+
+def test_settlement_card_drops_internal_and_future_record_fields():
+    """AC-7.2 deny-by-default: method/reference/recorded_by are record-only
+    bookkeeping, and any field the record gains tomorrow (a fee, a payment
+    ETA) stays invisible — the card is built field-by-field, never copied."""
+    claim = _decided_claim(
+        settlement=_settlement_record(fee=12.5, payment_eta="2026-09-25")
+    )
+
+    payload = public_status_payload(claim, [])
+
+    assert payload["settlement"] == {
+        "amount": 1150.0,
+        "settledAt": claim["settlement"]["settled_at"],
+    }
+    raw = str(payload)
+    for marker in (
+        "bank_transfer",
+        "BNK-2026-000123",
+        "adjuster@claimos.dev",
+        "12.5",
+        "2026-09-25",
+        "payment_eta",
+        "fee",
+    ):
+        assert marker not in raw, f"settlement bookkeeping leaked to the portal: {marker}"
+
+
+def test_settlement_card_omitted_when_record_has_no_visible_fields():
+    """A record carrying only bookkeeping (or malformed/empty fields) projects
+    to nothing — the card never renders an empty shell or placeholders."""
+    claim = _decided_claim(
+        settlement=_settlement_record(amount=None, settled_at="")
+    )
+
+    payload = public_status_payload(claim, [])
+
+    assert "settlement" not in payload
+
+
+def test_lookup_returns_settlement_card_after_recording(client, patched_mongo, make_authenticated_user):
+    """API round-trip through the real chain: the settlement endpoint stores
+    the record and emits payout_recorded (Wave 0 wiring), the next lookup
+    carries the card and the completed final milestone — and none of the
+    record bookkeeping."""
+    db = patched_mongo
+    code = _make_claim(db, status="auto_approved", agent_trace={"decision": {"verdict": "approved"}})
+    headers, _, _ = make_authenticated_user(client, role="adjuster")
+
+    response = client.post(
+        "/api/claims/CLM-20260917-042/settlement",
+        json={"amount": 1150.0, "method": "bank_transfer", "reference": "BNK-1"},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+
+    body = _lookup(client, "CLM-20260917-042", code).json()
+    assert body["settlement"]["amount"] == 1150.0
+    assert body["settlement"]["settledAt"]
+    raw = str(body)
+    assert "bank_transfer" not in raw
+    assert "BNK-1" not in raw
+    milestones = {m["key"]: m for m in body["milestones"]}
+    assert milestones["payout_recorded"]["done"] is True
+
+
+def test_lookup_omits_settlement_key_before_recording(client, patched_mongo):
+    """API round-trip absence branch: the response body drops the key entirely
+    (response_model_exclude_unset), so the card cannot render from a null."""
+    db = patched_mongo
+    code = _make_claim(db, status="auto_approved", agent_trace={"decision": {"verdict": "approved"}})
+
+    body = _lookup(client, "CLM-20260917-042", code).json()
+    assert "settlement" not in body
