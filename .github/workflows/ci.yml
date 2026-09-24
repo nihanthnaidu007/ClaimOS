@@ -322,7 +322,7 @@ jobs:
           docker compose logs --no-color api worker | tee frontend/test-results/compose-logs/api-worker-fault.log
       - name: Upload Playwright artifacts on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-artifacts
           path: frontend/test-results/
